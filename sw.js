@@ -1,161 +1,71 @@
-/**
- * Service Worker para o DC Gestor (v1.0 Alfa)
- *
- * Este Service Worker implementa estratégias de cache para tornar a aplicação
- * funcional offline após a primeira carga. As estratégias utilizadas:
- *
- * - Cache First: Para ativos estáticos (HTML, CSS, JS, imagens) - garante carregamento rápido
- * - Stale While Revalidate: Para dados da API (quando houver integração futura)
- * - Network Only: Para requisições que devem sempre ir à rede
- *
- * @author Gustavo Cardoso
- * @version 1.0.0 (v1.0 Alfa)
- */
-
-const CACHE_NAME = 'dc-gestor-v1-alpha-3';
-const ASSETS_CRITICOS = [
-    // Assets essenciais que devem sempre estar disponíveis offline
-    '/',
-    '/index.html',
-    '/js/app.js',
-    '/js/supabase.js',
-    '/js/auth.js',
-    '/js/storage.js',
-    '/js/utils.js',
-    '/js/pdf.js',
-    '/js/supabase-lib.js',
-    '/manifest.json',
-    '/sw.js',
+// Service Worker do DC Gestor - cache do app para funcionar sem internet
+const VERSAO = 'dc-gestor-v1.0.2-alfa';
+const CASCA = [
+  './', './index.html', './manifest.json',
+  './js/app.js', './js/auth.js', './js/pdf.js', './js/storage.js', './js/supabase.js', './js/utils.js'
 ];
 
-// Instalação do Service Worker
-self.addEventListener('install', (event) => {
-    console.log('🔧 Service Worker: Instalando...');
+// Imagens: cada uma entra separada, para um arquivo faltando não travar a instalação
+const BANCOS = ['banco-do-brasil', 'bradesco', 'c6', 'caixa', 'inter', 'itau', 'mercado-pago', 'neon', 'nubank', 'original', 'pagbank', 'picpay', 'santander', 'sicoob', 'sicredi'];
+const IMAGENS = [
+  './assets/img/logo.png', './assets/img/favicon.png', './assets/img/apple-touch-icon.png', './assets/img/whatsapp.png',
+  './assets/img/icon-192.png', './assets/img/icon-512.png', './assets/img/icon-maskable-512.png',
+  ...BANCOS.map((n) => './assets/logos-bancos/' + n + '.png')
+];
 
-    event.waitUntil(
-        caches.open(CACHE_NAME)
-            .then((cache) => {
-                console.log('📦 Service Worker: Cache aberto, adicionando assets críticos...');
-                return cache.addAll(ASSETS_CRITICOS)
-                    .then(() => {
-                        console.log('✅ Service Worker: Assets críticos cacheados');
-                        // Força o ativação imediata após instalação
-                        return self.skipWaiting();
-                    })
-                    .catch((err) => {
-                        console.error('❌ Service Worker: Erro ao cachear assets:', err);
-                    });
-            })
-            .catch((err) => {
-                console.error('❌ Service Worker: Erro ao abrir cache:', err);
-            })
-    );
+self.addEventListener('install', (e) => {
+  e.waitUntil(
+    caches.open(VERSAO)
+      .then(async (c) => {
+        await c.addAll(CASCA);
+        await Promise.allSettled(IMAGENS.map((u) => c.add(u)));
+      })
+      .then(() => self.skipWaiting())
+  );
 });
 
-// Ativação do Service Worker
-self.addEventListener('activate', (event) => {
-    console.log('🚀 Service Worker: Ativando...');
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys()
+      .then((chaves) => Promise.all(chaves.filter((k) => k !== VERSAO).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
+});
 
-    event.waitUntil(
-        caches.keys().then((cacheNames) => {
-            return Promise.all(
-                cacheNames.map((cache) => {
-                    if (cache !== CACHE_NAME) {
-                        console.log('🗑️ Service Worker: Removendo cache antigo:', cache);
-                        return caches.delete(cache);
-                    }
-                })
-            );
+self.addEventListener('fetch', (e) => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  // Nunca intercepta o Supabase (API, auth e realtime)
+  if (url.hostname.endsWith('supabase.co')) return;
+
+  // Navegação: tenta a rede e cai para o index em cache quando offline
+  if (req.mode === 'navigate') {
+    e.respondWith(
+      fetch(req)
+        .then((res) => {
+          const copia = res.clone();
+          caches.open(VERSAO).then((c) => c.put('./index.html', copia));
+          return res;
         })
-            // Remove qualquer claim antigo e assume o controle imediatamente
-            .then(() => {
-                console.log('✅ Service Worker: Ativo e assumindo controle');
-                return self.clients.claim();
-            })
+        .catch(() => caches.match('./index.html').then((r) => r || caches.match('./')))
     );
+    return;
+  }
+
+  // Demais arquivos: usa o cache e atualiza em segundo plano
+  e.respondWith(
+    caches.match(req).then((emCache) => {
+      const rede = fetch(req)
+        .then((res) => {
+          if (res && (res.ok || res.type === 'opaque')) {
+            const copia = res.clone();
+            caches.open(VERSAO).then((c) => c.put(req, copia));
+          }
+          return res;
+        })
+        .catch(() => emCache);
+      return emCache || rede;
+    })
+  );
 });
-
-// Estratégia de busca (Fetch Events)
-self.addEventListener('fetch', (event) => {
-    // Pular requisições para terceiros ou API endpoints que não devemos cachear
-    const url = new URL(event.request.url);
-
-    // Só intercepta GET da mesma origem (CDN, fontes e Supabase passam direto pela rede)
-    if (event.request.method !== 'GET' || url.origin !== self.location.origin) {
-        return;
-    }
-
-    // Estratégia: Network First (sempre pega a versão nova; se estiver offline, usa o cache)
-    event.respondWith(
-        fetch(event.request)
-            .then((networkResponse) => {
-                if (networkResponse.ok) {
-                    const cloned = networkResponse.clone();
-                    caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
-                }
-                return networkResponse;
-            })
-            .catch(() => caches.match(event.request).then((r) => r || offlineFallback(event.request)))
-    );
-});
-
-/**
- * Fallback offline para requisições que não podem ser atendidas do cache.
- *
- * Retorna uma resposta genérica indicando que o recurso não está disponível offline.
- *
- * @param {Request} request - A requisição que falhou.
- * @returns {Promise<Response>} Response indicando recurso indisponível offline.
- */
-function offlineFallback(request) {
-    // Para navegações (HTML), retorna a página offline básica
-    if (request.mode === 'navigate' || (request.method === 'GET' && (request.headers.get('accept') || '').includes('text/html'))) {
-        return caches.match('/index.html')
-            .then((response) => {
-                if (response) return response;
-                // Fallback HTML genérico
-                return new Response(
-                    '<html><body><h1>DC Gestor Offline</h1>' +
-                    '<p>A aplicação está funcionando em modo offline.</p>' +
-                    '<p>Alguns dados podem não estar disponíveis até o retorno da conexão.</p>' +
-                    '</body></html>',
-                    {
-                        headers: { 'Content-Type': 'text/html' }
-                    }
-                );
-            });
-    }
-
-    // Para outros tipos de requisição, retorna JSON de erro
-    return new Response(
-        JSON.stringify({ error: 'Recurso não disponível em modo offline', requestUrl: request.url }),
-        {
-            status: 503,
-            headers: { 'Content-Type': 'application/json' }
-        }
-    );
-}
-
-// ============================================================================
-// BACKGROUND SYNC (Comentado para simplicidade - pode ser ativado posteriormente)
-// ============================================================================
-//
-// // Registra um background sync para sincronizar rascunhos quando voltar online
-// if ('serviceWorker' in navigator && 'sync' in Registration.prototype) {
-//     async function registrarSync() {
-//         try {
-//             const registration = await navigator.serviceWorker.ready;
-//             await registration.sync.register('dc-gestor-sync-drafts');
-//             console.log('✅ Background sync registrado para rascunhos');
-//         } catch (err) {
-//             console.warn('⚠️ Não foi possível registrar background sync:', err);
-//         }
-//     }
-//
-// // Escuta mensagens do cliente para trigger sync
-// self.addEventListener('message', (event) => {
-//     if (event.data && event.data.type === 'trigger-sync') {
-//         event.source.postMessage({ type: 'sync-now' });
-//     }
-// });
-// ============================================================================

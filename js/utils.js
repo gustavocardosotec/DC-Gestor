@@ -1,471 +1,203 @@
-/**
- * Módulo de Utilitários do DC Gestor
- *
- * Funções auxiliares para formatação, cálculos, validações e helpers gerais.
- *
- * @author Gustavo Cardoso
- * @version 1.0.0 (v1.0 Alfa)
- */
+// Utilitários do DC Gestor: formatação, máscaras, cálculos e Pix EMV/CRC16
+export const $ = (seletor, raiz = document) => raiz.querySelector(seletor);
+export const $$ = (seletor, raiz = document) => [...raiz.querySelectorAll(seletor)];
 
-// ============================================================================
-// FORMATAÇÃO DE MOEDA E NÚMEROS
-// ============================================================================
+export const esc = (s) =>
+  String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-/**
- * Formata um número para moeda brasileira (R$ X.XXX,XX).
- *
- * @param {number} valor - Valor numérico.
- * @returns {string} Valor formatado.
- */
-export function formatarMoeda(valor) {
-    if (typeof valor !== 'number' || isNaN(valor)) return 'R$ 0,00';
-    return valor.toLocaleString('pt-BR', {
-        style: 'currency',
-        currency: 'BRL'
-    });
+export const uuid = () =>
+  crypto.randomUUID
+    ? crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        return (c === 'x' ? r : (r & 3) | 8).toString(16);
+      });
+
+export const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+export const apenasDigitos = (s) => String(s ?? '').replace(/\D/g, '');
+export const semAcentos = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+/** Converte "1.234,56", "12,5" ou "12.5" em número. */
+export function parseNum(v) {
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  let s = String(v ?? '').trim().replace(/[^\d.,-]/g, '');
+  if (!s) return 0;
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(s);
+  return isFinite(n) ? n : 0;
 }
+export const numParaInput = (n) => (parseNum(n) > 0 ? String(parseNum(n)).replace('.', ',') : '');
 
-/**
- * Formata um número para exibição simples (1.234,56).
- *
- * @param {number} valor - Valor numérico.
- * @param {number} decimais - Casas decimais (padrão 2).
- * @returns {string} Valor formatado.
- */
-export function formatarNumero(valor, decimais = 2) {
-    if (typeof valor !== 'number' || isNaN(valor)) return '0'.padStart(decimais + 1, '0');
-    return valor.toLocaleString('pt-BR', {
-        minimumFractionDigits: decimais,
-        maximumFractionDigits: decimais
-    });
-}
+export const brl = (n) => (Number(n) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+export const fmt2 = (n) =>
+  (Number(n) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export const fmtQtd = (n) =>
+  (Number(n) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
 
-/**
- * Converte string de moeda brasileira para número.
- * Ex: "R$ 1.234,56" -> 1234.56
- *
- * @param {string} str - String com valor monetário.
- * @returns {number} Valor numérico.
- */
-export function parseMoeda(str) {
-    if (!str) return 0;
-    // Remove R$, espaços, pontos de milhar, troca vírgula por ponto
-    const limpo = str.replace(/[R$\s.]/g, '').replace(',', '.');
-    const num = parseFloat(limpo);
-    return isNaN(num) ? 0 : num;
-}
-
-/**
- * Formata quantidade removendo .00 desnecessário.
- *
- * @param {number} qtd - Quantidade.
- * @returns {string} Quantidade formatada.
- */
-export function formatarQuantidade(qtd) {
-    if (typeof qtd !== 'number' || isNaN(qtd)) return '0';
-    return qtd % 1 === 0 ? qtd.toString() : qtd.toFixed(2).replace('.', ',');
-}
-
-// ============================================================================
-// CÁLCULOS DE ORÇAMENTO
-// ============================================================================
-
-/**
- * Calcula o valor total de um item (quantidade × valor unitário).
- *
- * @param {number} quantidade - Quantidade do item.
- * @param {number} valorUnitario - Valor unitário.
- * @returns {number} Valor total do item.
- */
-export function calcularValorTotalItem(quantidade, valorUnitario) {
-    return Math.round((quantidade * valorUnitario) * 100) / 100;
-}
-
-/**
- * Calcula o valor total de um orçamento somando todos os itens.
- *
- * @param {Array} itens - Array de itens do orçamento.
- * @returns {number} Valor total do orçamento.
- */
-export function calcularValorTotalOrcamento(itens) {
-    if (!Array.isArray(itens)) return 0;
-    return itens.reduce((total, item) => {
-        const qtd = parseFloat(item.quantidade) || 0;
-        const vu = parseFloat(item.valorUnitario) || 0;
-        return total + (qtd * vu);
-    }, 0);
-}
-
-/**
- * Encontra a melhor cotação (menor preço) para um item.
- *
- * @param {Array} cotacoes - Array de cotações [{loja, valorUnitario}].
- * @returns {Object|null} Melhor cotação ou null se não houver.
- */
-export function encontrarMelhorCotacao(cotacoes) {
-    if (!Array.isArray(cotacoes) || cotacoes.length === 0) return null;
-    return cotacoes.reduce((melhor, atual) => {
-        const vAtual = parseFloat(atual.valorUnitario) || Infinity;
-        const vMelhor = parseFloat(melhor.valorUnitario) || Infinity;
-        return vAtual < vMelhor ? atual : melhor;
-    });
-}
-
-/**
- * Calcula economia total comparando com a pior cotação.
- *
- * @param {Array} itens - Itens com cotações.
- * @returns {number} Valor economizado.
- */
-export function calcularEconomiaTotal(itens) {
-    if (!Array.isArray(itens)) return 0;
-    return itens.reduce((economia, item) => {
-        if (!item.cotacoes || item.cotacoes.length < 2) return economia;
-        const valores = item.cotacoes.map(c => parseFloat(c.valorUnitario) || 0).filter(v => v > 0);
-        if (valores.length < 2) return economia;
-        const menor = Math.min(...valores);
-        const maior = Math.max(...valores);
-        const qtd = parseFloat(item.quantidade) || 1;
-        return economia + ((maior - menor) * qtd);
-    }, 0);
-}
-
-// ============================================================================
-// VALIDAÇÕES
-// ============================================================================
-
-/**
- * Valida CPF/CNPJ básico (apenas formato).
- *
- * @param {string} doc - CPF ou CNPJ.
- * @returns {boolean} True se formato válido.
- */
-export function validarCpfCnpj(doc) {
-    if (!doc) return false;
-    const limpo = doc.replace(/\D/g, '');
-    return limpo.length === 11 || limpo.length === 14;
-}
-
-/**
- * Valida telefone brasileiro.
- *
- * @param {string} tel - Telefone.
- * @returns {boolean} True se formato válido.
- */
-export function validarTelefone(tel) {
-    if (!tel) return false;
-    const limpo = tel.replace(/\D/g, '');
-    return limpo.length >= 10 && limpo.length <= 11;
-}
-
-/**
- * Valida e-mail.
- *
- * @param {string} email - E-mail.
- * @returns {boolean} True se formato válido.
- */
-export function validarEmail(email) {
-    if (!email) return false;
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-/**
- * Valida campos obrigatórios do orçamento.
- *
- * @param {Object} dados - Dados do orçamento.
- * @returns {Object} {valido: boolean, erros: string[]}.
- */
-export function validarOrcamento(dados) {
-    const erros = [];
-
-    if (!dados.tituloObra?.trim()) erros.push('Título da obra é obrigatório');
-    if (!dados.clienteNome?.trim()) erros.push('Nome do cliente é obrigatório');
-    if (!dados.clienteTelefone?.trim()) erros.push('Telefone do cliente é obrigatório');
-    else if (!validarTelefone(dados.clienteTelefone)) erros.push('Telefone inválido');
-    if (!dados.itens || dados.itens.length === 0) erros.push('Adicione pelo menos um item/material');
-
-    return {
-        valido: erros.length === 0,
-        erros
-    };
-}
-
-// ============================================================================
-// HELPERS DE DATA E ID
-// ============================================================================
-
-/**
- * Gera ID único curto (timestamp + random).
- *
- * @returns {string} ID único.
- */
-export function gerarId() {
-    return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
-}
-
-/**
- * Formata data para padrão brasileiro (DD/MM/AAAA).
- *
- * @param {Date|string} data - Data.
- * @returns {string} Data formatada.
- */
-export function formatarData(data) {
-    const d = data instanceof Date ? data : new Date(data);
-    if (isNaN(d.getTime())) return '';
-    return d.toLocaleDateString('pt-BR');
-}
-
-/**
- * Formata data e hora para padrão brasileiro.
- *
- * @param {Date|string} data - Data.
- * @returns {string} Data e hora formatada.
- */
-export function formatarDataHora(data) {
-    const d = data instanceof Date ? data : new Date(data);
-    if (isNaN(d.getTime())) return '';
-    return d.toLocaleString('pt-BR');
-}
-
-/**
- * Gera código do orçamento (ex: ORC-20241115-ABC123).
- *
- * @returns {string} Código do orçamento.
- */
-export function gerarCodigoOrcamento() {
-    const agora = new Date();
-    const dataStr = agora.toISOString().slice(0, 10).replace(/-/g, '');
-    const rand = Math.random().toString(36).substr(2, 5).toUpperCase();
-    return `ORC-${dataStr}-${rand}`;
-}
-
-// ============================================================================
-// QR CODE PIX (EMV)
-// ============================================================================
-
-/**
- * Mapeamento de bancos para códigos ISPB/participantes do Pix.
- */
-export const BANCOS_PIX = {
-    'nubank': { nome: 'Nubank', ispb: '18236120', arquivo: 'Nubank.png' },
-    'itau': { nome: 'Itaú', ispb: '60701190', arquivo: 'Itaú.png' },
-    'bradesco': { nome: 'Bradesco', ispb: '60746948', arquivo: 'Bradesco.png' },
-    'caixa': { nome: 'Caixa', ispb: '00360305', arquivo: 'Caixa.png' },
-    'santander': { nome: 'Santander', ispb: '90400888', arquivo: 'Santander.png' },
-    'banco-do-brasil': { nome: 'Banco do Brasil', ispb: '00000000', arquivo: 'Banco do Brasil.png' },
-    'inter': { nome: 'Inter', ispb: '07416731', arquivo: 'Inter.png' },
-    'c6': { nome: 'C6 Bank', ispb: '36030526', arquivo: 'C6.png' },
-    'original': { nome: 'Original', ispb: '12440788', arquivo: 'Original.png' },
-    'mercado-pago': { nome: 'Mercado Pago', ispb: '10573521', arquivo: 'Mercado Pago.png' },
-    'picpay': { nome: 'PicPay', ispb: '17352188', arquivo: 'PicPay.png' },
-    'pagbank': { nome: 'PagBank', ispb: '29093580', arquivo: 'PagBank.png' },
-    'neon': { nome: 'Neon', ispb: '20115437', arquivo: 'Neon.png' },
-    'sicredi': { nome: 'Sicredi', ispb: '02529725', arquivo: 'Sicredi.png' },
-    'sicoob': { nome: 'Sicoob', ispb: '02018587', arquivo: 'Sicoob.png' },
+// ---------- Datas (sempre no fuso local, sem surpresas de UTC) ----------
+const doisDig = (n) => String(n).padStart(2, '0');
+export const hojeISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${doisDig(d.getMonth() + 1)}-${doisDig(d.getDate())}`;
+};
+export const fmtData = (iso) => {
+  const [a, m, d] = String(iso || hojeISO()).slice(0, 10).split('-');
+  return `${d}/${m}/${a}`;
+};
+export const addDias = (iso, dias) => {
+  const [a, m, d] = String(iso || hojeISO()).slice(0, 10).split('-').map(Number);
+  const nova = new Date(a, m - 1, d + (parseInt(dias, 10) || 0));
+  return `${nova.getFullYear()}-${doisDig(nova.getMonth() + 1)}-${doisDig(nova.getDate())}`;
 };
 
-/**
- * Gera o payload EMV para QR Code Pix (Copia e Cola).
- * Baseado na especificação do Banco Central do Brasil.
- *
- * @param {Object} config - Configurações Pix.
- * @param {string} config.tipoChave - Tipo da chave (cpf, cnpj, email, telefone, aleatoria).
- * @param {string} config.chave - Chave Pix.
- * @param {string} config.recebedor - Nome do recebedor.
- * @param {string} config.cidade - Cidade do recebedor.
- * @param {number} config.valor - Valor da transação.
- * @param {string} [config.txid] - Identificador da transação.
- * @param {string} [config.banco] - Chave do banco (ex: 'nubank').
- * @returns {string} Payload EMV para QR Code.
- */
-export function gerarPayloadPix(config) {
-    const {
-        tipoChave,
-        chave,
-        recebedor,
-        cidade,
-        valor,
-        txid,
-        banco
-    } = config;
+// ---------- Máscaras ----------
+export const mascTel = (v) => {
+  const d = apenasDigitos(v).slice(0, 11);
+  if (d.length <= 2) return d;
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+};
+export const mascDoc = (v) => {
+  const d = apenasDigitos(v).slice(0, 14);
+  if (d.length <= 11) {
+    return d.replace(/^(\d{3})(\d)/, '$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1-$2');
+  }
+  return d.replace(/^(\d{2})(\d)/, '$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1/$2').replace(/(\d{4})(\d)/, '$1-$2');
+};
+export const mascCep = (v) => apenasDigitos(v).slice(0, 8).replace(/^(\d{5})(\d)/, '$1-$2');
+export const MASCARAS = { tel: mascTel, doc: mascDoc, cep: mascCep };
 
-    // Função para criar campo EMV (ID + tamanho + valor)
-    const emv = (id, value) => {
-        const str = String(value);
-        const len = str.length.toString().padStart(2, '0');
-        return `${id}${len}${str}`;
-    };
+// ---------- Bancos (logos reais em assets/logos-bancos; sigla/cor servem de reserva) ----------
+export const PASTA_LOGOS_BANCOS = 'assets/logos-bancos/';
+export const LOGO_EMPRESA = 'assets/img/logo.png';
+export const LOGO_ZAP = 'assets/img/whatsapp.png';
+export const BANCOS = [
+  { id: 'nubank', nome: 'Nubank', arquivo: 'nubank.png', cor: '#8A05BE', texto: '#FFFFFF', sigla: 'nu', grad: ['#8A05BE', '#4f0577'] },
+  { id: 'itau', nome: 'Itaú', arquivo: 'itau.png', cor: '#EC7000', texto: '#FFFFFF', sigla: 'Itaú', grad: ['#EC7000', '#a84f00'] },
+  { id: 'bradesco', nome: 'Bradesco', arquivo: 'bradesco.png', cor: '#CC092F', texto: '#FFFFFF', sigla: 'B', grad: ['#CC092F', '#85061f'] },
+  { id: 'bb', nome: 'Banco do Brasil', arquivo: 'banco-do-brasil.png', cor: '#FCFC30', texto: '#0038A8', sigla: 'BB', grad: ['#0A4FD0', '#052a75'] },
+  { id: 'caixa', nome: 'Caixa', arquivo: 'caixa.png', cor: '#0070AF', texto: '#FFFFFF', sigla: 'CX', grad: ['#0070AF', '#00456d'] },
+  { id: 'santander', nome: 'Santander', arquivo: 'santander.png', cor: '#EC0000', texto: '#FFFFFF', sigla: 'S', grad: ['#EC0000', '#8f0000'] },
+  { id: 'inter', nome: 'Inter', arquivo: 'inter.png', cor: '#FF7A00', texto: '#FFFFFF', sigla: 'in', grad: ['#FF7A00', '#b85600'] },
+  { id: 'c6', nome: 'C6 Bank', arquivo: 'c6.png', cor: '#242424', texto: '#FFFFFF', sigla: 'C6', grad: ['#3a3a3a', '#0d0d0d'] },
+  { id: 'picpay', nome: 'PicPay', arquivo: 'picpay.png', cor: '#21C25E', texto: '#FFFFFF', sigla: 'PP', grad: ['#21C25E', '#12803c'] },
+  { id: 'mercadopago', nome: 'Mercado Pago', arquivo: 'mercado-pago.png', cor: '#FFE600', texto: '#2D3277', sigla: 'MP', grad: ['#00A1E4', '#00669f'] },
+  { id: 'pagbank', nome: 'PagBank', arquivo: 'pagbank.png', cor: '#41B544', texto: '#FFFFFF', sigla: 'PB', grad: ['#41B544', '#267a29'] },
+  { id: 'sicredi', nome: 'Sicredi', arquivo: 'sicredi.png', cor: '#3FA110', texto: '#FFFFFF', sigla: 'Si', grad: ['#3FA110', '#296b0a'] },
+  { id: 'sicoob', nome: 'Sicoob', arquivo: 'sicoob.png', cor: '#003641', texto: '#FFFFFF', sigla: 'Sc', grad: ['#00525f', '#001c22'] },
+  { id: 'neon', nome: 'Neon', arquivo: 'neon.png', cor: '#00E1FF', texto: '#0F2742', sigla: 'ne', grad: ['#00B8D4', '#00717f'] },
+  { id: 'original', nome: 'Banco Original', arquivo: 'original.png', cor: '#00A65A', texto: '#FFFFFF', sigla: 'Or', grad: ['#00A65A', '#006b3a'] },
+  { id: 'btg', nome: 'BTG Pactual', arquivo: '', cor: '#001E3C', texto: '#FFFFFF', sigla: 'BTG', grad: ['#0b3a6b', '#000e1c'] },
+  { id: 'outro', nome: 'Outro banco', arquivo: '', cor: '#475569', texto: '#FFFFFF', sigla: '🏛', grad: ['#52627a', '#1e293b'] }
+];
+export const obterBanco = (id) => BANCOS.find((b) => b.id === id) || BANCOS[BANCOS.length - 1];
+export const urlLogoBanco = (id) => {
+  const b = obterBanco(id);
+  return b.arquivo ? PASTA_LOGOS_BANCOS + encodeURIComponent(b.arquivo) : '';
+};
 
-    // Payload Format Indicator (00) - sempre "01"
-    let payload = emv('00', '01');
+export const TIPOS_CHAVE = [
+  { id: 'cpf', nome: 'CPF', rotulo: 'CPF' },
+  { id: 'cnpj', nome: 'CNPJ', rotulo: 'CNPJ' },
+  { id: 'celular', nome: 'Celular', rotulo: 'Celular' },
+  { id: 'email', nome: 'E-mail', rotulo: 'E-mail' },
+  { id: 'aleatoria', nome: 'Chave aleatória', rotulo: 'Chave' }
+];
 
-    // Point of Initiation Method (01) - 11 = estático, 12 = dinâmico
-    const temValor = valor && valor > 0;
-    payload += emv('01', temValor ? '12' : '11');
-
-    // Merchant Account Information (26) - GUI + Chave
-    // GUI do BR Code: br.gov.bcb.pix
-    let merchantInfo = emv('00', 'br.gov.bcb.pix');
-    // Chave Pix (01)
-    merchantInfo += emv('01', chave);
-    // Informações adicionais (02) - opcional, pode incluir txid
-    if (txid) {
-        merchantInfo += emv('02', txid);
-    }
-    payload += emv('26', merchantInfo);
-
-    // Merchant Category Code (52) - 0000 = não especificado
-    payload += emv('52', '0000');
-
-    // Transaction Currency (53) - 986 = BRL
-    payload += emv('53', '986');
-
-    // Transaction Amount (54) - apenas se valor informado
-    if (temValor) {
-        payload += emv('54', valor.toFixed(2));
-    }
-
-    // Country Code (58) - BR
-    payload += emv('58', 'BR');
-
-    // Merchant Name (59) - nome do recebedor (máx 25 chars)
-    const nomeRecebedor = recebedor.substring(0, 25);
-    payload += emv('59', nomeRecebedor);
-
-    // Merchant City (60) - cidade (máx 15 chars)
-    const cidadeRecebedor = cidade.substring(0, 15);
-    payload += emv('60', cidadeRecebedor);
-
-    // Postal Code (61) - opcional, CEP
-    // payload += emv('61', '01310100');
-
-    // Additional Data Field Template (62)
-    let additionalData = '';
-    // Reference Label (05) - identificador da transação
-    if (txid) {
-        additionalData += emv('05', txid);
-    }
-    if (additionalData) {
-        payload += emv('62', additionalData);
-    }
-
-    // CRC16 (63) - calculado no final
-    const payloadParaCrc = payload + '6304';
-    const crc = calcularCRC16(payloadParaCrc).toString(16).toUpperCase().padStart(4, '0');
-    payload += emv('63', crc);
-
-    return payload;
+// ---------- Pix EMV (BR Code) com CRC16-CCITT ----------
+export function crc16(texto) {
+  let crc = 0xffff;
+  for (let i = 0; i < texto.length; i++) {
+    crc ^= texto.charCodeAt(i) << 8;
+    for (let b = 0; b < 8; b++) crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+  }
+  return crc.toString(16).toUpperCase().padStart(4, '0');
 }
 
-/**
- * Calcula CRC16 (CCITT-FALSE / ISO 13239) para validação do Pix.
- *
- * @param {string} str - String para calcular CRC.
- * @returns {number} CRC16.
- */
-function calcularCRC16(str) {
-    let crc = 0xFFFF;
-    for (let i = 0; i < str.length; i++) {
-        crc ^= str.charCodeAt(i) << 8;
-        for (let j = 0; j < 8; j++) {
-            if (crc & 0x8000) {
-                crc = (crc << 1) ^ 0x1021;
-            } else {
-                crc = crc << 1;
-            }
-            crc &= 0xFFFF;
-        }
-    }
-    return crc & 0xFFFF;
+/** Normaliza a chave conforme o tipo (formato exigido no BR Code). */
+export function normalizarChavePix(tipo, chave) {
+  const bruta = String(chave ?? '').trim();
+  if (tipo === 'cpf' || tipo === 'cnpj') return apenasDigitos(bruta);
+  if (tipo === 'celular') {
+    const d = apenasDigitos(bruta);
+    if (bruta.startsWith('+')) return '+' + d;
+    return d.startsWith('55') && d.length > 11 ? '+' + d : '+55' + d;
+  }
+  if (tipo === 'email') return bruta.toLowerCase();
+  return bruta;
 }
 
-/**
- * Retorna o caminho do logo do banco para o QR Code.
- *
- * @param {string} bancoKey - Chave do banco (ex: 'nubank').
- * @returns {string} Caminho relativo do logo.
- */
-export function getLogoBanco(bancoKey) {
-    const banco = BANCOS_PIX[bancoKey?.toLowerCase()];
-    if (banco) {
-        return `assets/logos-bancos/${banco.arquivo}`;
-    }
-    // Fallback genérico
-    return 'assets/logos-bancos/Nubank.png';
+export function montarPayloadPix({ chave, tipo, valor = 0, nome = '', cidade = '', txid = '***' }) {
+  const campo = (id, v) => id + String(v.length).padStart(2, '0') + v;
+  const chaveFinal = normalizarChavePix(tipo, chave);
+  const nomeFinal = semAcentos(nome).toUpperCase().replace(/[^A-Z0-9 ]/g, '').trim().slice(0, 25) || 'NAO INFORMADO';
+  const cidadeFinal = semAcentos(cidade).toUpperCase().replace(/[^A-Z0-9 ]/g, '').trim().slice(0, 15) || 'BRASIL';
+  const conta = campo('00', 'br.gov.bcb.pix') + campo('01', chaveFinal);
+  let corpo =
+    campo('00', '01') +
+    campo('01', '11') +
+    campo('26', conta) +
+    campo('52', '0000') +
+    campo('53', '986');
+  if (valor > 0) corpo += campo('54', Number(valor).toFixed(2));
+  corpo +=
+    campo('58', 'BR') +
+    campo('59', nomeFinal) +
+    campo('60', cidadeFinal) +
+    campo('62', campo('05', String(txid).replace(/[^A-Za-z0-9]/g, '').slice(0, 25) || '***')) +
+    '6304';
+  return corpo + crc16(corpo);
 }
 
-/**
- * Retorna lista de bancos disponíveis para select.
- *
- * @returns {Array} Array de {value, label, arquivo}.
- */
-export function listarBancosDisponiveis() {
-    return Object.entries(BANCOS_PIX).map(([key, banco]) => ({
-        value: key,
-        label: banco.nome,
-        arquivo: banco.arquivo
-    }));
+/** Texto amigável da chave (ex.: "14 98838-4386") para exibir no PDF. */
+export function chaveParaExibir(tipo, chave) {
+  const d = apenasDigitos(chave);
+  if (tipo === 'celular') return mascTel(d.startsWith('55') && d.length > 11 ? d.slice(2) : d).replace(/^\((\d{2})\)\s/, '$1 ');
+  if (tipo === 'cpf' || tipo === 'cnpj') return mascDoc(d);
+  return String(chave ?? '');
 }
 
-// ============================================================================
-// WHATSAPP
-// ============================================================================
+// ---------- Cálculos do orçamento ----------
+export const precosDoItem = (item) => (item.lojas || [0, 0, 0]).map(parseNum);
 
-/**
- * Gera link do WhatsApp com mensagem pré-preenchida.
- *
- * @param {Object} params - Parâmetros da mensagem.
- * @param {string} params.telefone - Telefone do destinatário (com DDD, só números).
- * @param {string} params.mensagem - Mensagem codificada.
- * @returns {string} URL do WhatsApp.
- */
-export function gerarLinkWhatsApp({ telefone, mensagem }) {
-    const tel = telefone.replace(/\D/g, '');
-    const msg = encodeURIComponent(mensagem);
-    return `https://wa.me/55${tel}?text=${msg}`;
+/** Custo unitário: menor preço informado ou o da loja escolhida. */
+export function custoUnitario(item) {
+  const precos = precosDoItem(item);
+  const validos = precos.filter((p) => p > 0);
+  if (!validos.length) return 0;
+  const escolha = item.escolha;
+  if (typeof escolha === 'number' && precos[escolha] > 0) return precos[escolha];
+  return Math.min(...validos);
+}
+export const vendaUnitaria = (item, margem) => round2(custoUnitario(item) * (1 + parseNum(margem) / 100));
+export const totalDoItem = (item, margem) => round2(vendaUnitaria(item, margem) * parseNum(item.qtd));
+
+export function calcularTotais(orc) {
+  const itens = orc.itens || [];
+  const subtotal = round2(itens.reduce((s, i) => s + totalDoItem(i, orc.margem_lucro), 0));
+  const custo = round2(itens.reduce((s, i) => s + custoUnitario(i) * parseNum(i.qtd), 0));
+  const maoDeObra = round2(parseNum(orc.mao_de_obra));
+  const desconto = round2(parseNum(orc.desconto));
+  const acrescimo = round2(parseNum(orc.acrescimo));
+  const total = Math.max(0, round2(subtotal + maoDeObra + acrescimo - desconto));
+
+  // Comparativo: total de cada loja, só quando ela tem preço em todos os itens cotados
+  const cotados = itens.filter((i) => parseNum(i.qtd) > 0 && precosDoItem(i).some((p) => p > 0));
+  const porLoja = [0, 1, 2].map((j) =>
+    cotados.length && cotados.every((i) => precosDoItem(i)[j] > 0)
+      ? round2(cotados.reduce((s, i) => s + precosDoItem(i)[j] * parseNum(i.qtd), 0))
+      : null
+  );
+  return { subtotal, custo, maoDeObra, desconto, acrescimo, total, lucro: round2(subtotal - custo), porLoja };
 }
 
-/**
- * Substitui placeholders na mensagem padrão.
- *
- * @param {string} template - Template com placeholders.
- * @param {Object} dados - Dados para substituição.
- * @returns {string} Mensagem processada.
- */
-export function processarTemplateWhatsApp(template, dados) {
-    return template
-        .replace(/{{cliente}}/g, dados.clienteNome || '')
-        .replace(/{{codigo}}/g, dados.codigo || '')
-        .replace(/{{obra}}/g, dados.tituloObra || '')
-        .replace(/{{total}}/g, formatarMoeda(dados.valorTotal || 0))
-        .replace(/{{empresa}}/g, dados.nomeEmpresa || 'DC Elétrica Residencial');
-}
+export const itemVazio = () => ({ descricao: '', qtd: 1, lojas: [0, 0, 0], escolha: 'menor' });
 
-// ============================================================================
-// STORAGE HELPERS (ponte para storage.js)
-// ============================================================================
-
-/**
- * Salva rascunho completo no LocalStorage.
- * Wrapper para manter compatibilidade.
- */
-export async function salvarOrcamentoLocal(orcamento) {
-    const { salvarRascunho } = await import('./storage.js');
-    return salvarRascunho(orcamento);
-}
-
-/**
- * Lista orçamentos do LocalStorage.
- */
-export async function listarOrcamentosLocal() {
-    const { listarRascunhos } = await import('./storage.js');
-    return listarRascunhos();
-}
-
-/**
- * Remove orçamento do LocalStorage.
- */
-export async function removerOrcamentoLocal(id) {
-    const { removerRascunho } = await import('./storage.js');
-    return removerRascunho(id);
-}
+export const STATUS = {
+  rascunho: { nome: 'Rascunho', cls: 'bg-slate-100 text-slate-600' },
+  enviado: { nome: 'Enviado', cls: 'bg-blue-100 text-blue-700' },
+  aprovado: { nome: 'Aprovado', cls: 'bg-green-100 text-green-700' },
+  recusado: { nome: 'Recusado', cls: 'bg-red-100 text-red-700' },
+  concluido: { nome: 'Concluído', cls: 'bg-orange-100 text-orange-700' }
+};

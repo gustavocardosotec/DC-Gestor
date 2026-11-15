@@ -1,695 +1,269 @@
-/**
- * Módulo de Geração de PDF do DC Gestor
- *
- * Gera orçamentos em PDF com fidelidade absoluta ao modelo de referência
- * (Referencias/Orçamento Modelo.pdf). Usa jsPDF via CDN.
- *
- * @author Gustavo Cardoso
- * @version 1.0.0 (v1.0 Alfa)
- */
+// Geração do PDF do orçamento (layout fiel ao "Orçamento Modelo.pdf") e do QR Code Pix
+import {
+  esc, brl, fmt2, fmtQtd, fmtData, addDias, hojeISO, parseNum, semAcentos,
+  calcularTotais, vendaUnitaria, totalDoItem, montarPayloadPix, chaveParaExibir,
+  obterBanco, TIPOS_CHAVE, urlLogoBanco, LOGO_EMPRESA
+} from './utils.js';
 
-import { formatarMoeda, formatarData, formatarDataHora, formatarQuantidade, gerarCodigoOrcamento, gerarPayloadPix, getLogoBanco, processarTemplateWhatsApp, gerarLinkWhatsApp, encontrarMelhorCotacao, calcularEconomiaTotal, validarOrcamento } from './utils.js';
+const LARANJA = '#F26B1D';
+const MARINHO = '#0F2742';
+const LINHAS_MINIMAS = 18; // o modelo tem 18 linhas de itens
 
-// ============================================================================
-// CONFIGURAÇÕES DO PDF
-// ============================================================================
-
-// Dimensões A4 em mm (jsPDF usa mm por padrão)
-const PDF_CONFIG = {
-    pageWidth: 210,
-    pageHeight: 297,
-    margin: 15,
-    contentWidth: 180, // 210 - 2*15
-    fontFamily: 'helvetica',
-    colors: {
-        primary: [249, 115, 22],      // Laranja DC #F97316
-        dark: [30, 41, 59],           // #1e293b
-        gray: [100, 116, 139],        // #64748b
-        lightGray: [226, 232, 240],   // #e2e8f0
-        white: [255, 255, 255],
-        black: [0, 0, 0],
-        green: [16, 185, 129],        // #10b981
-        blue: [59, 130, 246],         // #3b82f6
-    }
-};
-
-// ============================================================================
-// CARREGAMENTO DO JSPDF VIA CDN
-// ============================================================================
-
-let jsPDF = null;
-let autoTable = null;
-
-/**
- * Carrega jsPDF e plugin autoTable via CDN dinamicamente.
- * Retorna Promise que resolve quando ambos estiverem disponíveis.
- */
-async function carregarJsPDF() {
-    if (jsPDF && autoTable) return { jsPDF, autoTable };
-
-    return new Promise((resolve, reject) => {
-        // Verifica se já está carregado globalmente
-        if (window.jspdf && window.jspdf.jsPDF) {
-            jsPDF = window.jspdf.jsPDF;
-            autoTable = window.jspdf.autoTable || (window.jspdf.default?.autoTable);
-            if (autoTable) {
-                resolve({ jsPDF, autoTable });
-                return;
-            }
-        }
-
-        // Carrega jsPDF via CDN
-        const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-        script.onload = () => {
-            jsPDF = window.jspdf.jsPDF;
-
-            // Carrega autoTable plugin
-            const scriptTable = document.createElement('script');
-            scriptTable.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js';
-            scriptTable.onload = () => {
-                autoTable = jsPDF.API.autoTable;
-                resolve({ jsPDF, autoTable });
-            };
-            scriptTable.onerror = () => reject(new Error('Falha ao carregar autoTable'));
-            document.head.appendChild(scriptTable);
-        };
-        script.onerror = () => reject(new Error('Falha ao carregar jsPDF'));
-        document.head.appendChild(script);
-    });
+function carregarImagem(src) {
+  return new Promise((resolve) => {
+    if (!src) return resolve(null);
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
 }
 
 /**
- * Converte imagem para base64 (para logos no PDF).
- *
- * @param {string} url - URL da imagem.
- * @returns {Promise<string>} Base64 da imagem.
+ * Gera um QR Code (nível H) com um logo no centro. Devolve um data URL PNG.
+ * opcoes.logo = caminho da imagem; se ela não carregar, usa a sigla colorida.
  */
-async function imagemParaBase64(url) {
-    try {
-        const response = await fetch(url);
-        const blob = await response.blob();
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-        });
-    } catch (err) {
-        console.warn('⚠️ Falha ao carregar imagem:', url, err);
-        return null;
-    }
-}
-
-// ============================================================================
-// GERAÇÃO DO PDF PRINCIPAL
-// ============================================================================
-
-/**
- * Gera o PDF do orçamento com fidelidade ao modelo.
- *
- * @param {Object} orcamento - Dados completos do orçamento.
- * @param {Object} empresa - Dados da empresa (configurações).
- * @returns {Promise<Blob>} Blob do PDF gerado.
- */
-export async function gerarOrcamentoPDF(orcamento, empresa) {
-    console.log('📄 Gerando PDF do orçamento...', orcamento);
-
-    // Carrega bibliotecas
-    await carregarJsPDF();
-
-    const doc = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-    });
-
-    const { pageWidth, margin, contentWidth, colors } = PDF_CONFIG;
-    let y = margin;
-
-    // --- HEADER: Logo + Dados da Empresa ---
-    y = await desenharCabecalho(doc, orcamento, empresa, y);
-
-    // --- DADOS DO CLIENTE E OBRA ---
-    y = desenharDadosClienteObra(doc, orcamento, empresa, y);
-
-    // --- TABELA DE ITENS ---
-    y = await desenharTabelaItens(doc, orcamento, y);
-
-    // --- TOTAIS ---
-    y = desenharTotais(doc, orcamento, y);
-
-    // --- QR CODE PIX + WHATSAPP ---
-    y = await desenharPixEWhatsApp(doc, orcamento, empresa, y);
-
-    // --- RODAPÉ ---
-    desenharRodape(doc, orcamento, empresa);
-
-    // Retorna blob
-    const pdfBlob = doc.output('blob');
-    console.log('✅ PDF gerado com sucesso');
-    return pdfBlob;
-}
-
-/**
- * Desenha cabeçalho com logo da empresa e informações.
- */
-async function desenharCabecalho(doc, orcamento, empresa, y) {
-    const { pageWidth, margin, contentWidth, colors } = PDF_CONFIG;
-    const leftX = margin;
-    const rightX = pageWidth - margin;
-
-    // Logo da empresa (se houver)
-    let logoBase64 = null;
-    if (empresa.logo_url) {
-        logoBase64 = await imagemParaBase64(empresa.logo_url);
-    }
-
-    if (logoBase64) {
-        try {
-            doc.addImage(logoBase64, 'PNG', leftX, y, 30, 30);
-        } catch (e) {
-            console.warn('Falha ao adicionar logo:', e);
-        }
-    }
-
-    // Nome da empresa (lado esquerdo, ao lado da logo)
-    const empresaX = logoBase64 ? leftX + 35 : leftX;
-    doc.setFontSize(18);
-    doc.setFont(PDF_CONFIG.fontFamily, 'bold');
-    doc.setTextColor(...colors.dark);
-    doc.text(empresa.nome_empresa || 'DC Elétrica Residencial', empresaX, y + 8);
-
-    doc.setFontSize(9);
-    doc.setFont(PDF_CONFIG.fontFamily, 'normal');
-    doc.setTextColor(...colors.gray);
-
-    let lineY = y + 14;
-    if (empresa.cpf_cnpj) {
-        doc.text(`CNPJ/CPF: ${empresa.cpf_cnpj}`, empresaX, lineY);
-        lineY += 5;
-    }
-    if (empresa.endereco) {
-        doc.text(empresa.endereco, empresaX, lineY);
-        lineY += 5;
-    }
-    if (empresa.telefone) {
-        doc.text(`Tel: ${empresa.telefone}`, empresaX, lineY);
-        lineY += 5;
-    }
-    if (empresa.email) {
-        doc.text(empresa.email, empresaX, lineY);
-    }
-
-    // Lado direito: Código do orçamento + Data
-    const codigo = orcamento.codigo || gerarCodigoOrcamento();
-    const dataEmissao = formatarData(orcamento.createdAt || new Date());
-
-    doc.setFontSize(10);
-    doc.setFont(PDF_CONFIG.fontFamily, 'bold');
-    doc.setTextColor(...colors.primary);
-    doc.text('ORÇAMENTO', rightX, y + 8, { align: 'right' });
-
-    doc.setFontSize(9);
-    doc.setFont(PDF_CONFIG.fontFamily, 'normal');
-    doc.setTextColor(...colors.dark);
-    doc.text(`Código: ${codigo}`, rightX, y + 16, { align: 'right' });
-    doc.text(`Data: ${dataEmissao}`, rightX, y + 22, { align: 'right' });
-    doc.text(`Status: ${orcamento.status?.toUpperCase() || 'RASCUNHO'}`, rightX, y + 28, { align: 'right' });
-
-    // Linha separadora
-    y = Math.max(lineY, y + 35);
-    doc.setDrawColor(...colors.lightGray);
-    doc.setLineWidth(0.5);
-    doc.line(margin, y, pageWidth - margin, y);
-    y += 5;
-
-    return y;
-}
-
-/**
- * Desenha seção de dados do cliente e obra.
- */
-function desenharDadosClienteObra(doc, orcamento, empresa, y) {
-    const { margin, contentWidth, colors } = PDF_CONFIG;
-    const leftX = margin;
-    const colWidth = contentWidth / 2 - 2;
-
-    // Título da seção
-    doc.setFontSize(11);
-    doc.setFont(PDF_CONFIG.fontFamily, 'bold');
-    doc.setTextColor(...colors.dark);
-    doc.text('DADOS DO CLIENTE E DA OBRA', leftX, y);
-    y += 8;
-
-    // Label/Value helper
-    const drawField = (label, value, x, yPos, width) => {
-        doc.setFontSize(8);
-        doc.setFont(PDF_CONFIG.fontFamily, 'bold');
-        doc.setTextColor(...colors.gray);
-        doc.text(label.toUpperCase(), x, yPos);
-        doc.setFont(PDF_CONFIG.fontFamily, 'normal');
-        doc.setTextColor(...colors.dark);
-        doc.setFontSize(9);
-        // Quebra linha se texto longo
-        const lines = doc.splitTextToSize(value || '-', width);
-        doc.text(lines, x, yPos + 4);
-        return yPos + 4 + (lines.length - 1) * 4;
-    };
-
-    // Coluna esquerda: Cliente
-    let yLeft = y;
-    yLeft = drawField('Cliente', orcamento.cliente_nome, leftX, yLeft, colWidth);
-    yLeft = drawField('Telefone', orcamento.cliente_telefone, leftX, yLeft, colWidth);
-    yLeft = drawField('Endereço', orcamento.cliente_endereco, leftX, yLeft, colWidth);
-
-    // Coluna direita: Obra
-    let yRight = y;
-    yRight = drawField('Obra', orcamento.titulo_obra, leftX + colWidth + 4, yRight, colWidth);
-    yRight = drawField('Data Prevista', orcamento.data_prevista ? formatarData(orcamento.data_prevista) : '-', leftX + colWidth + 4, yRight, colWidth);
-
-    y = Math.max(yLeft, yRight) + 5;
-
-    // Linha separadora
-    doc.setDrawColor(...colors.lightGray);
-    doc.line(margin, y, 210 - margin, y);
-    y += 5;
-
-    return y;
-}
-
-/**
- * Desenha tabela de itens/materiais com cotações.
- */
-async function desenharTabelaItens(doc, orcamento, y) {
-    const { margin, contentWidth, colors } = PDF_CONFIG;
-
-    if (!orcamento.itens || orcamento.itens.length === 0) {
-        doc.setFontSize(10);
-        doc.setTextColor(...colors.gray);
-        doc.text('Nenhum item cadastrado.', margin, y);
-        return y + 10;
-    }
-
-    // Preparar dados para autoTable
-    const head = [['Item', 'Descrição', 'Qtd', 'Und', 'Vl. Unit.', 'Vl. Total', 'Melhor Cotação']];
-    const body = [];
-
-    orcamento.itens.forEach((item, index) => {
-        const melhor = encontrarMelhorCotacao(item.cotacoes);
-        const melhorTexto = melhor ? `${melhor.loja}: ${formatarMoeda(melhor.valorUnitario)}` : '-';
-
-        body.push([
-            (index + 1).toString(),
-            item.descricao || '-',
-            formatarQuantidade(item.quantidade),
-            item.unidade || 'un',
-            formatarMoeda(item.valorUnitario),
-            formatarMoeda(item.valorTotal || (item.quantidade * item.valorUnitario)),
-            melhorTexto
-        ]);
-    });
-
-    // Configuração da tabela
-    await doc.autoTable({
-        startY: y,
-        head: head,
-        body: body,
-        theme: 'striped',
-        headStyles: {
-            fillColor: colors.primary,
-            textColor: colors.white,
-            fontSize: 8,
-            fontStyle: 'bold',
-            halign: 'center'
-        },
-        bodyStyles: {
-            fontSize: 8,
-            textColor: colors.dark,
-            halign: 'center'
-        },
-        columnStyles: {
-            0: { cellWidth: 12, halign: 'center' },      // Item
-            1: { cellWidth: 55, halign: 'left' },        // Descrição
-            2: { cellWidth: 15, halign: 'center' },      // Qtd
-            3: { cellWidth: 15, halign: 'center' },      // Und
-            4: { cellWidth: 25, halign: 'right' },       // Vl. Unit.
-            5: { cellWidth: 25, halign: 'right' },       // Vl. Total
-            6: { cellWidth: 33, halign: 'left', fontSize: 7 } // Melhor Cotação
-        },
-        alternateRowStyles: {
-            fillColor: [248, 250, 252]
-        },
-        margin: { left: margin, right: margin },
-        tableWidth: contentWidth,
-        didDrawPage: (data) => {
-            // Header personalizado se precisar
-        }
-    });
-
-    return doc.lastAutoTable.finalY + 5;
-}
-
-/**
- * Desenha seção de totais.
- */
-function desenharTotais(doc, orcamento, y) {
-    const { margin, contentWidth, colors } = PDF_CONFIG;
-    const rightX = 210 - margin;
-
-    const valorTotal = orcamento.valor_total || 0;
-    const economia = calcularEconomiaTotal(orcamento.itens);
-
-    // Subtotal (mesmo que total se não houver descontos)
-    doc.setFontSize(9);
-    doc.setFont(PDF_CONFIG.fontFamily, 'normal');
-    doc.setTextColor(...colors.gray);
-    doc.text('Subtotal:', rightX - 40, y);
-    doc.setFont(PDF_CONFIG.fontFamily, 'bold');
-    doc.setTextColor(...colors.dark);
-    doc.text(formatarMoeda(valorTotal), rightX, y, { align: 'right' });
-    y += 6;
-
-    // Desconto (se houver)
-    if (orcamento.desconto && orcamento.desconto > 0) {
-        doc.setFont(PDF_CONFIG.fontFamily, 'normal');
-        doc.setTextColor(...colors.gray);
-        doc.text('Desconto:', rightX - 40, y);
-        doc.setFont(PDF_CONFIG.fontFamily, 'bold');
-        doc.setTextColor(...colors.green);
-        doc.text(`-${formatarMoeda(orcamento.desconto)}`, rightX, y, { align: 'right' });
-        y += 6;
-    }
-
-    // Economia com cotações
-    if (economia > 0) {
-        doc.setFont(PDF_CONFIG.fontFamily, 'normal');
-        doc.setTextColor(...colors.gray);
-        doc.text('Economia nas cotações:', rightX - 40, y);
-        doc.setFont(PDF_CONFIG.fontFamily, 'bold');
-        doc.setTextColor(...colors.green);
-        doc.text(`-${formatarMoeda(economia)}`, rightX, y, { align: 'right' });
-        y += 6;
-    }
-
-    // Linha separadora
-    doc.setDrawColor(...colors.lightGray);
-    doc.setLineWidth(0.3);
-    doc.line(rightX - 60, y, rightX, y);
-    y += 4;
-
-    // TOTAL
-    doc.setFontSize(12);
-    doc.setFont(PDF_CONFIG.fontFamily, 'bold');
-    doc.setTextColor(...colors.primary);
-    doc.text('TOTAL:', rightX - 40, y);
-    doc.text(formatarMoeda(valorTotal), rightX, y, { align: 'right' });
-    y += 10;
-
-    return y;
-}
-
-/**
- * Gera o QR Code (PNG em base64) localmente com a biblioteca qrcode-generator.
- *
- * @param {string} texto - Conteúdo do QR Code (payload Pix).
- * @returns {Promise<string>} Data URL PNG.
- */
-async function gerarQrBase64(texto) {
-    if (!window.qrcode) {
-        await new Promise((resolve, reject) => {
-            const s = document.createElement('script');
-            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
-            s.onload = resolve;
-            s.onerror = () => reject(new Error('Falha ao carregar biblioteca de QR Code'));
-            document.head.appendChild(s);
-        });
-    }
-    const qr = window.qrcode(0, 'H'); // correção alta: aguenta o logo no centro
-    qr.addData(texto);
-    qr.make();
-    const n = qr.getModuleCount();
-    const cell = 8, borda = 2 * cell, tam = n * cell + borda * 2;
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = tam;
-    const ctx = canvas.getContext('2d');
+export async function gerarQR(texto, opcoes = {}) {
+  if (typeof QRCode === 'undefined') throw new Error('Biblioteca de QR Code não carregada.');
+  const { logo = '', cor = '#475569', textoCor = '#FFFFFF', sigla = '' } = opcoes;
+  const imagem = await carregarImagem(logo);
+  const caixa = document.createElement('div');
+  caixa.style.cssText = 'position:fixed;left:-9999px;top:0;';
+  document.body.appendChild(caixa);
+  try {
+    new QRCode(caixa, { text: texto, width: 360, height: 360, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H });
+    await new Promise((r) => setTimeout(r, 40));
+    const origem = caixa.querySelector('canvas');
+    const tam = 360;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = tam;
+    const ctx = cv.getContext('2d');
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, tam, tam);
-    ctx.fillStyle = '#000';
-    for (let r = 0; r < n; r++) {
-        for (let c = 0; c < n; c++) {
-            if (qr.isDark(r, c)) ctx.fillRect(borda + c * cell, borda + r * cell, cell, cell);
-        }
+    ctx.drawImage(origem, 0, 0, tam, tam);
+    if (imagem || sigla) {
+      const moldura = 84, miolo = 72, x = (tam - moldura) / 2, xm = (tam - miolo) / 2;
+      const arredondado = (px, py, l, r) => {
+        ctx.beginPath();
+        ctx.moveTo(px + r, py);
+        ctx.arcTo(px + l, py, px + l, py + l, r);
+        ctx.arcTo(px + l, py + l, px, py + l, r);
+        ctx.arcTo(px, py + l, px, py, r);
+        ctx.arcTo(px, py, px + l, py, r);
+        ctx.closePath();
+      };
+      ctx.fillStyle = '#fff';
+      arredondado(x, x, moldura, 18);
+      ctx.fill();
+      if (imagem) {
+        ctx.save();
+        arredondado(xm, xm, miolo, 14);
+        ctx.clip();
+        ctx.drawImage(imagem, xm, xm, miolo, miolo);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = cor;
+        arredondado(xm, xm, miolo, 14);
+        ctx.fill();
+        ctx.fillStyle = textoCor;
+        ctx.font = `800 ${sigla.length > 2 ? 24 : 32}px Inter, Arial, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(sigla, tam / 2, tam / 2 + 2);
+      }
     }
-    return canvas.toDataURL('image/png');
+    return cv.toDataURL('image/png');
+  } finally {
+    caixa.remove();
+  }
 }
 
-/**
- * Desenha QR Code Pix + botão WhatsApp.
- */
-async function desenharPixEWhatsApp(doc, orcamento, empresa, y) {
-    const { margin, pageWidth, contentWidth, colors } = PDF_CONFIG;
-    const leftX = margin;
-    const rightX = pageWidth - margin;
-    const centerX = pageWidth / 2;
+/** QR do Pix com o logo real do banco da conta. */
+export function gerarQRPix(payload, idBanco) {
+  const b = obterBanco(idBanco);
+  return gerarQR(payload, { logo: urlLogoBanco(idBanco), cor: b.cor, textoCor: b.texto, sigla: b.sigla });
+}
 
-    // Verifica se tem configuração Pix
-    const temPix = empresa.pix_chave && empresa.pix_recebedor && empresa.pix_cidade;
+/** Conta Pix do orçamento: a escolhida nele, senão a padrão, senão a primeira cadastrada. */
+export function contaPixDoOrcamento(orc, perfil) {
+  const lista = perfil.pix_contas || [];
+  return lista.find((c) => c.id === orc.pix_id) || lista.find((c) => c.id === perfil.pix_padrao_id) || lista[0] || null;
+}
 
-    if (!temPix) {
-        doc.setFontSize(9);
-        doc.setTextColor(...colors.gray);
-        doc.setFont(PDF_CONFIG.fontFamily, 'italic');
-        doc.text('Configurações de Pix não preenchidas nas Configurações da Empresa.', centerX, y, { align: 'center' });
-        return y + 10;
-    }
+/** Payload Pix (copia e cola). Com valor > 0 sempre gera pela chave; sem valor, prefere o código colado pelo usuário. */
+export function payloadPix(conta, valor = 0) {
+  if (!conta) return '';
+  if (!conta.chave) return conta.copia_cola || '';
+  if (!(valor > 0) && conta.copia_cola) return conta.copia_cola;
+  return montarPayloadPix({ chave: conta.chave, tipo: conta.tipo, valor, nome: conta.titular, cidade: conta.cidade });
+}
 
-    // Gera payload Pix
-    const valorTotal = orcamento.valor_total || 0;
-    const txid = orcamento.codigo || gerarCodigoOrcamento().replace(/[^A-Za-z0-9]/g, '').substring(0, 25);
-    const bancoKey = (empresa.pix_banco || 'nubank').toLowerCase().replace(/\s+/g, '-');
+const campo = (rotulo, valor, flex = 1) =>
+  `<div style="flex:${flex};min-width:0;">
+     <div style="font-size:7.5px;font-weight:700;letter-spacing:.8px;color:#64748b;text-transform:uppercase;">${rotulo}</div>
+     <div style="font-size:11px;color:${MARINHO};border-bottom:1px solid #cbd5e1;min-height:17px;padding:1px 0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">${esc(valor) || '&nbsp;'}</div>
+   </div>`;
+const linhaCampos = (...c) => `<div style="display:flex;gap:12px;margin-bottom:7px;">${c.join('')}</div>`;
 
-    const payload = gerarPayloadPix({
-        tipoChave: empresa.pix_tipo_chave || 'aleatoria',
-        chave: empresa.pix_chave,
-        recebedor: empresa.pix_recebedor,
-        cidade: empresa.pix_cidade,
-        valor: valorTotal,
-        txid: txid,
-        banco: bancoKey
-    });
+/** Monta o HTML (estilos inline) do orçamento em A4. */
+export function montarHTMLOrcamento(orc, perfil, qrDataUrl, conta) {
+  const t = calcularTotais(orc);
+  const margem = orc.margem_lucro;
+  const emitido = orc.emitido_em || hojeISO();
+  const validade = addDias(emitido, orc.validade_dias || 7);
 
+  const linhas = (orc.itens || [])
+    .filter((i) => (i.descricao || '').trim() || (parseNum(i.qtd) > 0 && vendaUnitaria(i, margem) > 0))
+    .map((i) => ({ desc: i.descricao, qtd: fmtQtd(parseNum(i.qtd)), un: fmt2(vendaUnitaria(i, margem)), tot: fmt2(totalDoItem(i, margem)) }));
+  if (t.maoDeObra > 0) linhas.push({ desc: 'Mão de obra', qtd: '1', un: fmt2(t.maoDeObra), tot: fmt2(t.maoDeObra) });
+  const total = Math.max(LINHAS_MINIMAS, linhas.length);
+
+  const cel = 'padding:3px 6px;border-bottom:1px solid #e2e8f0;height:15px;';
+  let corpo = '';
+  for (let n = 0; n < total; n++) {
+    const l = linhas[n];
+    const fundo = n % 2 ? '#f8fafc' : '#fff';
+    corpo += `<tr style="background:${fundo};">
+      <td style="${cel}width:34px;text-align:center;color:#64748b;">${n + 1}</td>
+      <td style="${cel}text-align:left;">${l ? esc(l.desc) : '&nbsp;'}</td>
+      <td style="${cel}width:58px;text-align:center;">${l ? l.qtd : ''}</td>
+      <td style="${cel}width:86px;text-align:right;">${l ? l.un : ''}</td>
+      <td style="${cel}width:92px;text-align:right;font-weight:600;">${l ? l.tot : ''}</td></tr>`;
+  }
+
+  const valorOuTraco = (v) => (v > 0 ? brl(v) : 'R$ -');
+  const rotuloChave = (conta && (TIPOS_CHAVE.find((x) => x.id === conta.tipo) || {}).rotulo) || 'Chave';
+  const temPix = !!(conta && qrDataUrl);
+
+  const contato = [perfil.cpf_cnpj, perfil.telefone, perfil.email, perfil.endereco].filter(Boolean).map(esc).join('  •  ');
+  const logo = `<img src="${perfil.logo || LOGO_EMPRESA}" onerror="this.remove()" style="height:46px;max-width:120px;object-fit:contain;margin-right:12px;">`;
+
+  return `
+  <div style="width:794px;box-sizing:border-box;padding:30px 38px 26px;background:#fff;color:${MARINHO};font-family:Inter,Arial,Helvetica,sans-serif;">
+    <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid ${LARANJA};padding-bottom:10px;">
+      <div style="display:flex;align-items:center;min-width:0;">
+        ${logo}
+        <div style="min-width:0;">
+          <div style="font-size:22px;font-weight:800;line-height:1.1;">${esc(perfil.nome_comercial) || 'Sua empresa'}</div>
+          <div style="font-size:8.5px;color:#64748b;margin-top:3px;">${contato}</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:22px;margin:9px 0 12px;font-size:10.5px;">
+      <div><b>Orçamento nº:</b> ${esc(orc.numero)}</div>
+      <div><b>Emitido em:</b> ${fmtData(emitido)}</div>
+      <div><b>Válido até:</b> ${fmtData(validade)}</div>
+    </div>
+
+    <div style="font-size:11px;font-weight:800;color:${LARANJA};letter-spacing:1.2px;margin-bottom:6px;">CLIENTE</div>
+    ${linhaCampos(campo('Nome', orc.cliente_nome))}
+    ${linhaCampos(campo('Telefone', orc.cliente_telefone, 1), campo('E-mail', orc.cliente_email, 1.4))}
+    ${linhaCampos(campo('CPF/CNPJ', orc.cliente_documento))}
+    ${linhaCampos(campo('Endereço', orc.cliente_endereco, 2.4), campo('CEP', orc.cliente_cep, 1))}
+    ${linhaCampos(campo('Bairro', orc.cliente_bairro, 1.4), campo('Cidade', orc.cliente_cidade, 1.4), campo('Estado', orc.cliente_estado, .6))}
+    ${orc.obra_nome ? linhaCampos(campo('Obra', orc.obra_nome)) : ''}
+
+    <div style="font-size:11px;font-weight:800;color:${LARANJA};letter-spacing:1.2px;margin:12px 0 5px;">ORÇAMENTO</div>
+    <table style="width:100%;border-collapse:collapse;font-size:10px;">
+      <thead><tr style="background:${MARINHO};color:#fff;">
+        <th style="padding:5px 4px;font-weight:700;">ITEM</th><th style="padding:5px 6px;text-align:left;font-weight:700;">DESCRIÇÃO</th>
+        <th style="padding:5px 4px;font-weight:700;">QUANT.</th><th style="padding:5px 6px;text-align:right;font-weight:700;">VALOR</th>
+        <th style="padding:5px 6px;text-align:right;font-weight:700;">TOTAL</th></tr></thead>
+      <tbody style="line-height:1.15;">${corpo}</tbody>
+    </table>
+
+    <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+      <table style="font-size:10.5px;border-collapse:collapse;min-width:300px;">
+        <tr><td style="padding:3px 10px;font-weight:700;color:#64748b;">SUBTOTAL</td><td style="padding:3px 10px;text-align:right;">${brl(t.subtotal)}</td>
+            <td style="padding:3px 10px;font-weight:700;color:#64748b;">DESCONTO</td><td style="padding:3px 10px;text-align:right;">${valorOuTraco(t.desconto)}</td></tr>
+        <tr><td style="padding:3px 10px;font-weight:700;color:#64748b;">ACRÉSCIMO</td><td style="padding:3px 10px;text-align:right;">${valorOuTraco(t.acrescimo)}</td>
+            <td style="padding:5px 10px;font-weight:800;background:${LARANJA};color:#fff;">TOTAL</td><td style="padding:5px 10px;text-align:right;font-weight:800;font-size:13px;background:${LARANJA};color:#fff;">${brl(t.total)}</td></tr>
+      </table>
+    </div>
+
+    ${orc.observacoes ? `<div style="font-size:9.5px;color:#475569;margin-top:8px;"><b>Observações:</b> ${esc(orc.observacoes)}</div>` : ''}
+
+    <div style="page-break-inside:avoid;break-inside:avoid;margin-top:12px;border:1.5px solid ${LARANJA};border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:16px;">
+      ${temPix ? `<img src="${qrDataUrl}" style="width:112px;height:112px;">` : ''}
+      <div style="flex:1;">
+        <div style="font-size:12px;font-weight:800;color:${LARANJA};letter-spacing:1px;">PAGUE COM PIX</div>
+        ${temPix ? `
+        <div style="font-size:12px;margin-top:6px;"><b>Valor:</b> ${brl(t.total)}</div>
+        <div style="font-size:11px;margin-top:3px;"><b>Titular:</b> ${esc(conta.titular)}</div>
+        ${conta.mostrar_chave && conta.chave ? `<div style="font-size:11px;margin-top:3px;"><b>${rotuloChave}:</b> ${esc(chaveParaExibir(conta.tipo, conta.chave))}</div>` : ''}
+        <div style="font-size:9px;color:#64748b;margin-top:6px;">Escaneie o QR Code com o app do seu banco.</div>`
+        : `<div style="font-size:10px;color:#64748b;margin-top:6px;">Configure sua chave Pix em Configurações para exibir o QR Code aqui.</div>`}
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-around;margin-top:26px;font-size:10px;color:#475569;">
+      <div style="width:220px;text-align:center;border-top:1px solid #94a3b8;padding-top:4px;">Profissional</div>
+      <div style="width:220px;text-align:center;border-top:1px solid #94a3b8;padding-top:4px;">Cliente</div>
+    </div>
+  </div>`;
+}
+
+const nomeArquivo = (orc) =>
+  `Orcamento_${orc.numero}_${semAcentos(orc.cliente_nome || 'cliente').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '')}.pdf`;
+
+async function prepararElemento(orc, perfil) {
+  const t = calcularTotais(orc);
+  const conta = contaPixDoOrcamento(orc, perfil);
+  let qr = '';
+  const payload = payloadPix(conta, t.total);
+  if (payload) {
     try {
-        // QR Code gerado localmente (a API antiga do Google Charts foi desativada)
-        const qrBase64 = await gerarQrBase64(payload);
-
-        // Logo do banco no centro do QR Code
-        const logoBancoPath = getLogoBanco(bancoKey);
-        const logoBase64 = await imagemParaBase64(logoBancoPath);
-
-        // Desenha QR Code
-        const qrSize = 45; // mm
-        const qrX = centerX - qrSize / 2;
-        doc.addImage(qrBase64, 'PNG', qrX, y, qrSize, qrSize);
-
-        // Overlay logo do banco no centro
-        if (logoBase64) {
-            const logoSize = 12;
-            doc.addImage(logoBase64, 'PNG', centerX - logoSize / 2, y + (qrSize - logoSize) / 2, logoSize, logoSize);
-        }
-
-        y += qrSize + 3;
-
-        // Texto "Pix Copia e Cola"
-        doc.setFontSize(7);
-        doc.setFont(PDF_CONFIG.fontFamily, 'bold');
-        doc.setTextColor(...colors.dark);
-        doc.text('PIX COPIA E COLA', centerX, y, { align: 'center' });
-        y += 4;
-
-        // Payload em texto pequeno (quebrado em linhas)
-        doc.setFontSize(6);
-        doc.setFont(PDF_CONFIG.fontFamily, 'normal');
-        doc.setTextColor(...colors.gray);
-        const payloadLines = doc.splitTextToSize(payload, contentWidth - 10);
-        // Mostra só as primeiras 3 linhas para não ocupar muito espaço
-        payloadLines.slice(0, 3).forEach((line, i) => {
-            doc.text(line, centerX, y + i * 3, { align: 'center' });
-        });
-        y += 12;
-
-        // Link WhatsApp (mostra como texto clicável visual)
-        const mensagem = processarTemplateWhatsApp(
-            empresa.whatsapp_mensagem_padrao || 'Olá {{cliente}}, segue o orçamento {{codigo}} no valor de {{total}}.',
-            {
-                clienteNome: orcamento.cliente_nome,
-                codigo: orcamento.codigo,
-                tituloObra: orcamento.titulo_obra,
-                valorTotal: valorTotal,
-                nomeEmpresa: empresa.nome_empresa
-            }
-        );
-
-        const whatsappLink = gerarLinkWhatsApp({
-            telefone: orcamento.cliente_telefone,
-            mensagem: mensagem
-        });
-
-        doc.setFontSize(8);
-        doc.setFont(PDF_CONFIG.fontFamily, 'bold');
-        doc.setTextColor(...colors.green);
-        doc.text('Enviar por WhatsApp →', centerX, y, { align: 'center' });
-        y += 5;
-
-        doc.setFontSize(7);
-        doc.setFont(PDF_CONFIG.fontFamily, 'normal');
-        doc.setTextColor(...colors.gray);
-        const linkLines = doc.splitTextToSize(whatsappLink, contentWidth - 10);
-        linkLines.slice(0, 2).forEach((line, i) => {
-            doc.text(line, centerX, y + i * 3, { align: 'center' });
-        });
-
-    } catch (err) {
-        console.warn('⚠️ Falha ao gerar QR Code Pix:', err);
-        doc.setFontSize(9);
-        doc.setTextColor(...colors.gray);
-        doc.text('Erro ao gerar QR Code Pix', centerX, y, { align: 'center' });
-        y += 10;
+      qr = await gerarQRPix(payload, conta.banco);
+    } catch (e) {
+      console.warn('QR Code não gerado', e);
     }
-
-    return y;
+  }
+  const el = document.createElement('div'); // fica fora da tela; o html2pdf clona para renderizar
+  el.innerHTML = montarHTMLOrcamento(orc, perfil, qr, conta);
+  return el;
 }
 
-/**
- * Desenha rodapé do PDF.
- */
-function desenharRodape(doc, orcamento, empresa) {
-    const { margin, pageWidth, pageHeight, colors } = PDF_CONFIG;
-    const y = pageHeight - 15;
+const opcoes = (orc) => ({
+  margin: 0,
+  filename: nomeArquivo(orc),
+  image: { type: 'jpeg', quality: 0.98 },
+  html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0 },
+  jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+  pagebreak: { mode: ['css', 'legacy'], avoid: ['tr'] }
+});
 
-    doc.setDrawColor(...colors.lightGray);
-    doc.setLineWidth(0.3);
-    doc.line(margin, y - 3, pageWidth - margin, y - 3);
-
-    doc.setFontSize(7);
-    doc.setFont(PDF_CONFIG.fontFamily, 'normal');
-    doc.setTextColor(...colors.gray);
-
-    // Esquerda: Info da empresa
-    doc.text(`${empresa.nome_empresa || 'DC Elétrica Residencial'} - Orçamento gerado em ${formatarDataHora(new Date())}`, margin, y);
-
-    // Direita: Página
-    const pageCount = doc.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i);
-        doc.text(`Página ${i} de ${pageCount}`, pageWidth - margin, y, { align: 'right' });
-    }
-    doc.setPage(1);
+function exigirBiblioteca() {
+  if (typeof html2pdf === 'undefined') throw new Error('Biblioteca de PDF não carregada. Conecte-se à internet uma vez para habilitar.');
 }
 
-/**
- * Salva o PDF no dispositivo do usuário.
- *
- * @param {Blob} pdfBlob - Blob do PDF.
- * @param {string} nomeArquivo - Nome do arquivo.
- */
-export function salvarPDF(pdfBlob, nomeArquivo = 'orcamento.pdf') {
-    const url = URL.createObjectURL(pdfBlob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = nomeArquivo;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+export async function baixarPDF(orc, perfil) {
+  exigirBiblioteca();
+  const el = await prepararElemento(orc, perfil);
+  await html2pdf().set(opcoes(orc)).from(el).save();
 }
 
-/**
- * Abre o PDF em nova aba para visualização.
- *
- * @param {Blob} pdfBlob - Blob do PDF.
- */
-export function visualizarPDF(pdfBlob) {
-    const url = URL.createObjectURL(pdfBlob);
-    window.open(url, '_blank');
-    // Não revogar imediatamente para dar tempo de abrir
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-// ============================================================================
-// FUNÇÃO PRINCIPAL DE INTEGRAÇÃO (chamada pelo app.js)
-// ============================================================================
-
-/**
- * Função principal para gerar e baixar/visualizar o orçamento PDF.
- * Coleta dados do estado atual da aplicação.
- *
- * @param {Object} elements - Elementos DOM cacheados do app.js.
- * @param {Object} estadoApp - Estado atual (itens, cliente, empresa, etc.).
- */
-export async function gerarEExportarOrcamento(elements, estadoApp) {
+/** Tenta compartilhar o arquivo (WhatsApp etc.). Devolve true se compartilhou; false se só baixou. */
+export async function compartilharPDF(orc, perfil, texto) {
+  exigirBiblioteca();
+  const el = await prepararElemento(orc, perfil);
+  const blob = await html2pdf().set(opcoes(orc)).from(el).outputPdf('blob');
+  const arquivo = new File([blob], nomeArquivo(orc), { type: 'application/pdf' });
+  if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
     try {
-        // Coleta dados do formulário
-        const orcamento = {
-            codigo: gerarCodigoOrcamento(),
-            cliente_nome: elements.inputClienteNome?.value?.trim() || estadoApp.clienteNome,
-            cliente_telefone: elements.inputClienteTelefone?.value?.trim() || estadoApp.clienteTelefone,
-            cliente_endereco: elements.inputObraEndereco?.value?.trim() || estadoApp.clienteEndereco,
-            titulo_obra: elements.inputTituloObra?.value?.trim() || estadoApp.tituloObra,
-            itens: estadoApp.itens || [],
-            valor_total: estadoApp.valorTotal || 0,
-            status: 'enviado',
-            createdAt: new Date().toISOString(),
-            data_prevista: estadoApp.dataPrevista
-        };
-
-        // Dados da empresa (do LocalStorage/Configurações)
-        const { listarPreferencias } = await import('./storage.js');
-        const prefs = await listarPreferencias();
-        const empresa = {
-            nome_empresa: prefs.nomeEmpresa || elements.inputNomeEmpresa?.value || 'DC Elétrica Residencial',
-            cpf_cnpj: prefs.cnpj || elements.inputCnpj?.value,
-            telefone: prefs.telefoneEmpresa || elements.inputTelefoneEmpresa?.value,
-            email: prefs.emailEmpresa || elements.inputEmailEmpresa?.value,
-            endereco: prefs.enderecoEmpresa || elements.inputCidadeEmpresa?.value,
-            logo_url: prefs.logoUrl,
-            pix_tipo_chave: prefs.pixTipoChave || elements.selectPixTipo?.value,
-            pix_chave: prefs.pixChave || elements.inputPixChave?.value,
-            pix_recebedor: prefs.pixRecebedor || elements.inputPixRecebedor?.value,
-            pix_cidade: prefs.pixCidade || elements.inputPixCidade?.value,
-            pix_banco: prefs.pixBanco || 'nubank',
-            whatsapp_mensagem_padrao: prefs.whatsappMensagem || elements.textareaWhatsappMensagem?.value
-        };
-
-        // Validação
-        const validacao = validarOrcamento({
-            tituloObra: orcamento.titulo_obra,
-            clienteNome: orcamento.cliente_nome,
-            clienteTelefone: orcamento.cliente_telefone,
-            itens: orcamento.itens
-        });
-        if (!validacao.valido) {
-            alert('Erro na validação:\n' + validacao.erros.join('\n'));
-            return false;
-        }
-
-        // Gera PDF
-        const pdfBlob = await gerarOrcamentoPDF(orcamento, empresa);
-
-        // Salva/baixa
-        const nomeArquivo = `Orcamento_${orcamento.codigo}_${orcamento.cliente_nome.replace(/\s+/g, '_')}.pdf`;
-        salvarPDF(pdfBlob, nomeArquivo);
-
-        // Atualiza status no estado local
-        orcamento.status = 'enviado';
-        orcamento.updatedAt = new Date().toISOString();
-
-        alert('✅ Orçamento PDF gerado e salvo com sucesso!');
-        return true;
-
-    } catch (err) {
-        console.error('❌ Erro ao gerar PDF:', err);
-        alert('Erro ao gerar PDF: ' + err.message);
-        return false;
+      await navigator.share({ files: [arquivo], title: `Orçamento nº ${orc.numero}`, text: texto });
+      return true;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return true; // a pessoa cancelou
     }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = arquivo.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 15000);
+  return false;
 }

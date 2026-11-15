@@ -1,216 +1,167 @@
-/**
- * Módulo de Armazenamento Offline-First (LocalStorage)
- *
- * Fornece uma camada de persistência local usando LocalStorage para salvar
- * rascunhos, cadastros e configurações temporariamente quando o usuário estiver
- * sem sinal na obra. Implementa pattern de fallback para IndexedDB se necessário.
- *
- * @author Gustavo Cardoso
- * @version 1.0.0 (v1.0 Alfa)
- */
+// Motor offline-first: tudo grava no localStorage e sincroniza com o Supabase quando há sinal.
+import { hojeISO } from './utils.js';
 
-// ============================================================================
-// CHAVES DE LOCALSTORAGE
-// ============================================================================
+const K = { orcamentos: 'dcg:orcamentos', perfil: 'dcg:perfil' };
 
-// Chaves usadas no LocalStorage
-const STORAGE_KEYS = {
-    DRAFTS: 'dc-gestor-drafts',         // Rascunhos de orçamentos em andamento
-    CACHE_SYNC: 'dc-gestor-cache-sync', // Marca de tempo para sincronização
-    USER_PREFS: 'dc-gestor-user-prefs'  // Preferências do usuário (temas, etc.)
+export const CAMPOS_ORC = [
+  'id', 'numero', 'status', 'cliente_nome', 'cliente_telefone', 'cliente_email', 'cliente_documento',
+  'cliente_endereco', 'cliente_cep', 'cliente_bairro', 'cliente_cidade', 'cliente_estado',
+  'obra_nome', 'observacoes', 'itens', 'lojas_nomes', 'margem_lucro', 'mao_de_obra', 'desconto',
+  'acrescimo', 'pix_id', 'valor_total', 'validade_dias', 'emitido_em', 'created_at', 'updated_at'
+];
+export const CAMPOS_PERFIL = [
+  'nome_comercial', 'cpf_cnpj', 'telefone', 'email', 'endereco', 'logo', 'tensao', 'concessionaria',
+  'margem_padrao', 'mao_de_obra_padrao', 'validade_dias', 'pix_padrao_id', 'pix_contas', 'whatsapps',
+  'whatsapp_mensagem', 'updated_at'
+];
+
+export const PERFIL_PADRAO = {
+  nome_comercial: '',
+  cpf_cnpj: '',
+  telefone: '',
+  email: '',
+  endereco: '',
+  logo: '',
+  tensao: '127',
+  concessionaria: '',
+  margem_padrao: 0,
+  mao_de_obra_padrao: 0,
+  validade_dias: 7,
+  pix_padrao_id: '',
+  pix_contas: [],
+  whatsapps: [],
+  whatsapp_mensagem:
+    'Olá, {cliente}! Segue o orçamento nº {numero} ({obra}) no valor de {total}, válido até {validade}. Qualquer dúvida é só chamar!'
 };
 
-/**
- * Estrutura de um rascunho de orçamento no LocalStorage.
- *
- * @typedef {Object} DraftOrcamento
- * @property {string} id - ID único do rascunho (UUID ou timestamp).
- * @property {string} tituloObra - Título da obra informado pelo cliente.
- * @property {string} clienteNome - Nome do cliente.
- * @property {string} clienteTelefone - Telefone do cliente.
- * @property {string} clienteEndereco - Endereço da obra.
- * @property {Array} itens - Array de itens do orçamento.
- * @property {number} valorTotal - Valor total calculado.
- * @property {string} status - Status ('rascunho', 'enviado', etc.).
- * @property {string} createdAt - Data de criação (ISO string).
- * @property {string} updatedAt - Data da última atualização (ISO string).
- */
+const ler = (chave, padrao) => {
+  try {
+    const v = JSON.parse(localStorage.getItem(chave));
+    return v ?? padrao;
+  } catch {
+    return padrao;
+  }
+};
+const gravar = (chave, valor) => {
+  try {
+    localStorage.setItem(chave, JSON.stringify(valor));
+    return true;
+  } catch (e) {
+    console.error('Falha ao gravar no aparelho (armazenamento cheio?)', e);
+    return false;
+  }
+};
+const escolher = (obj, campos) => Object.fromEntries(campos.filter((c) => c in obj).map((c) => [c, obj[c]]));
+const agora = () => new Date().toISOString();
 
-/**
- * Salva um rascunho de orçamento no LocalStorage.
- *
- * Se já existir um rascunho com o mesmo ID, ele será substituído.
- * Se o storage estiver cheio ou indisponível, o erro será capturado e logged.
- *
- * @param {DraftOrcamento} rascunho - Objeto contendo os dados do rascunho.
- * @returns {boolean} True se o salvamento foi bem-sucedido, false caso contrário.
- */
-export function salvarRascunho(rascunho) {
-    try {
-        if (!window.localStorage) {
-            console.warn('⚠️ LocalStorage não disponível neste navegador.');
-            return false;
-        }
+let usuario = null;
+export const definirUsuario = (u) => { usuario = u; };
 
-        const rascunhos = listarRascunhos();
+// ---------- Orçamentos ----------
+const todos = () => ler(K.orcamentos, []);
+export const listarOrcamentos = () =>
+  todos().filter((o) => !o._del).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+export const obterOrcamento = (id) => todos().find((o) => o.id === id && !o._del) || null;
+export const proximoNumero = () => todos().reduce((m, o) => Math.max(m, Number(o.numero) || 0), 0) + 1;
+export const contarPendentes = () =>
+  todos().filter((o) => o._sync === 'pendente' || o._del).length + (obterPerfilBruto()._sync === 'pendente' ? 1 : 0);
 
-        // Remove qualquer rascunho existente com o mesmo ID (atualização)
-        const rascunhosAtualizados = rascunhos.filter(r => r.id !== rascunho.id);
-
-        // Adiciona o novo/atualizado rascunho
-        rascunhosAtualizados.push({
-            ...rascunho,
-            createdAt: rascunho.createdAt || new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-        });
-
-        localStorage.setItem(STORAGE_KEYS.DRAFTS, JSON.stringify(rascunhosAtualizados));
-
-        // Atualiza a marca de sincronização
-        localStorage.setItem(STORAGE_KEYS.CACHE_SYNC, new Date().toISOString());
-
-        console.log('✅ Rascunho salvo no LocalStorage:', rascunho.id);
-        return true;
-    } catch (err) {
-        console.error('❌ Erro ao salvar rascunho no LocalStorage:', err);
-        return false;
-    }
+export function salvarOrcamento(orc) {
+  const lista = todos();
+  const registro = { ...escolher(orc, CAMPOS_ORC), updated_at: agora(), _sync: 'pendente' };
+  if (!registro.created_at) registro.created_at = registro.updated_at;
+  if (!registro.emitido_em) registro.emitido_em = hojeISO();
+  const i = lista.findIndex((o) => o.id === registro.id);
+  if (i >= 0) lista[i] = registro; else lista.push(registro);
+  gravar(K.orcamentos, lista);
+  return registro;
 }
 
-/**
- * Lista todos os rascunhos salvos no LocalStorage.
- *
- * @returns {Array} Array de objetos de rascunho. Retorna array vazio se não houver dados.
- */
-export function listarRascunhos() {
-    try {
-        const dados = localStorage.getItem(STORAGE_KEYS.DRAFTS);
-        if (!dados) return [];
-
-        const rascunhos = JSON.parse(dados);
-
-        // Filtra apenas registros válidos (com ID e dados mínimos)
-        return rascunhos.filter(r => r && r.id && (r.tituloObra || r.titulo_obra)).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-    } catch (err) {
-        console.error('❌ Erro ao listar rascunhos:', err);
-        return [];
-    }
+export function excluirOrcamento(id) {
+  let lista = todos();
+  if (!usuario) {
+    lista = lista.filter((o) => o.id !== id); // modo local: apaga de vez
+  } else {
+    lista = lista.map((o) => (o.id === id ? { ...o, _del: true, _sync: 'pendente' } : o));
+  }
+  gravar(K.orcamentos, lista);
 }
 
-/**
- * Remove um rascunho específico do LocalStorage pelo ID.
- *
- * @param {string} rascunhoId - ID do rascunho a ser removido.
- * @returns {boolean} True se o remoção foi bem-sucedida.
- */
-export function removerRascunho(rascunhoId) {
-    try {
-        const rascunhos = listarRascunhos();
-        const rascunhosFiltrados = rascunhos.filter(r => r.id !== rascunhoId);
-
-        localStorage.setItem(STORAGE_KEYS.DRAFTS, JSON.stringify(rascunhosFiltrados));
-
-        console.log('✅ Rascunho removido do LocalStorage:', rascunhoId);
-        return true;
-    } catch (err) {
-        console.error('❌ Erro ao remover rascunho:', err);
-        return false;
-    }
+// ---------- Perfil da empresa ----------
+function obterPerfilBruto() {
+  return ler(K.perfil, { ...PERFIL_PADRAO, _sync: 'padrao' });
+}
+export function obterPerfil() {
+  const bruto = obterPerfilBruto();
+  const p = JSON.parse(JSON.stringify({ ...PERFIL_PADRAO, ...escolher(bruto, CAMPOS_PERFIL) })); // cópia: nunca altera o padrão
+  // Migração de perfis antigos (um único Pix solto no perfil)
+  if (!Array.isArray(bruto.pix_contas) && bruto.pix_chave) {
+    p.pix_contas = [{ id: 'pix-padrao', banco: bruto.pix_banco || 'outro', apelido: 'Pix', titular: bruto.pix_titular || '', tipo: bruto.pix_tipo || 'celular', chave: bruto.pix_chave, cidade: bruto.pix_cidade || '', mostrar_chave: bruto.pix_mostrar_chave !== false, copia_cola: '' }];
+    p.pix_padrao_id = 'pix-padrao';
+  }
+  if (!Array.isArray(p.pix_contas)) p.pix_contas = [];
+  if (!Array.isArray(p.whatsapps)) p.whatsapps = [];
+  return p;
+}
+export function salvarPerfil(perfil) {
+  gravar(K.perfil, { ...escolher(perfil, CAMPOS_PERFIL), updated_at: agora(), _sync: 'pendente' });
 }
 
-/**
- * Remove todos os rascunhos do LocalStorage (útil em reset ou logout).
- *
- * @returns {boolean} True se a remoção foi bem-sucedida.
- */
-export function limparTodosRascunhos() {
-    try {
-        localStorage.removeItem(STORAGE_KEYS.DRAFTS);
-        localStorage.removeItem(STORAGE_KEYS.CACHE_SYNC);
-        console.log('✅ Todos os rascunhos removidos do LocalStorage');
-        return true;
-    } catch (err) {
-        console.error('❌ Erro ao limpar rascunhos:', err);
-        return false;
-    }
+/** Limpa os dados do aparelho (usado ao sair da conta, depois de sincronizar). */
+export function limparTudo() {
+  localStorage.removeItem(K.orcamentos);
+  localStorage.removeItem(K.perfil);
 }
 
-/**
- * Verifica se há dados offline salvos e retorna a marca de sincronização.
- *
- * @returns {Object} Objeto com `temDadosOffline` e `ultimaSincronizacao`.
- */
-export function verificarEstadoOffline() {
-    try {
-        const ultimoSync = localStorage.getItem(STORAGE_KEYS.CACHE_SYNC);
-        const temDados = listarRascunhos().length > 0;
-
-        return {
-            temDadosOffline: temDados,
-            ultimaSincronizacao: ultimoSync ? new Date(ultimoSync) : null,
-            tempoDesdeSync: ultimoSync
-                ? Math.round((new Date().getTime() - new Date(ultimoSync).getTime()) / 60000) + ' minutos'
-                : 'Nunca'
-        };
-    } catch (err) {
-        console.error('❌ Erro ao verificar estado offline:', err);
-        return {
-            temDadosOffline: false,
-            ultimaSincronizacao: null,
-            tempoDesdeSync: 'Erro'
-        };
+// ---------- Sincronização com o Supabase ----------
+export async function sincronizar(sb, user) {
+  if (!sb || !user) return { ok: false, motivo: 'sem-conta' };
+  if (!navigator.onLine) return { ok: false, motivo: 'offline' };
+  try {
+    // 1) Perfil: envia se houver alteração local, senão baixa a versão da nuvem
+    let perfil = obterPerfilBruto();
+    if (perfil._sync === 'pendente') {
+      const { error } = await sb.from('perfis_empresa').upsert({ ...escolher(perfil, CAMPOS_PERFIL), user_id: user.id });
+      if (error) throw error;
+      gravar(K.perfil, { ...perfil, _sync: 'ok' });
+    } else {
+      const { data, error } = await sb.from('perfis_empresa').select('*').eq('user_id', user.id).maybeSingle();
+      if (error) throw error;
+      if (data) gravar(K.perfil, { ...escolher(data, CAMPOS_PERFIL), _sync: 'ok' });
     }
-}
 
-/**
- * Salva preferências do usuário (tema, configurações de interface, etc.).
- *
- * @param {Object} prefs - Objeto contendo as preferências a salvar.
- * @param {string} [prefs.tema='system'] - Tema ('light', 'dark', 'system').
- * @param {boolean} [prefs.notificacoes=true] - Se deve receber notificações.
- * @returns {boolean} True se salvo com sucesso.
- */
-export function salvarPreferenciasUsuario(prefs) {
-    try {
-        const dadosAtuais = listarPreferencias();
-        const prefsAtualizadas = {
-            ...dadosAtuais,
-            ...prefs,
-            atualizadaEm: new Date().toISOString()
-        };
-
-        localStorage.setItem(STORAGE_KEYS.USER_PREFS, JSON.stringify(prefsAtualizadas));
-        return true;
-    } catch (err) {
-        console.error('❌ Erro ao salvar preferências:', err);
-        return false;
+    // 2) Exclusões pendentes
+    let lista = todos();
+    for (const o of lista.filter((x) => x._del)) {
+      const { error } = await sb.from('orcamentos').delete().eq('id', o.id);
+      if (error) throw error;
     }
-}
+    lista = lista.filter((o) => !o._del);
 
-/**
- * Lista preferências do usuário do LocalStorage.
- *
- * @returns {Object} Objeto com as preferências atuais.
- */
-export function listarPreferencias() {
-    try {
-        const dados = localStorage.getItem(STORAGE_KEYS.USER_PREFS);
-        if (!dados) {
-            // Retorna padrões caso não tenham sido salvas ainda
-            return { tema: 'system', notificacoes: true, ultimaVersao: '1.0.0' };
-        }
-        return JSON.parse(dados);
-    } catch (err) {
-        console.error('❌ Erro ao listar preferências:', err);
-        return { tema: 'system', notificacoes: true, ultimaVersao: '1.0.0' };
+    // 3) Envia os orçamentos pendentes (em lote)
+    const pendentes = lista.filter((o) => o._sync === 'pendente');
+    if (pendentes.length) {
+      const linhas = pendentes.map((o) => ({ ...escolher(o, CAMPOS_ORC), user_id: user.id }));
+      const { error } = await sb.from('orcamentos').upsert(linhas);
+      if (error) throw error;
+      lista = lista.map((o) => (o._sync === 'pendente' ? { ...o, _sync: 'ok' } : o));
     }
-}
 
-// ============================================================================
-// EXTENSÃO OPCIONAL: IndexedDB (comentada para manter simplicidade)
-// ============================================================================
-// Caso a aplicação precise armazenar grandes volumes de dados (centenas de MB),
-// este módulo pode ser estendido para usar IndexedDB em vez de LocalStorage.
-// A troca é transparente para o resto da aplicação desde que se mantenha a mesma
-// estrutura de chaves e tipos de dados.
-// ============================================================================
+    // 4) Baixa o que mudou em outros aparelhos
+    const { data: remotos, error } = await sb.from('orcamentos').select('*');
+    if (error) throw error;
+    const idsRemotos = new Set(remotos.map((r) => r.id));
+    lista = lista.filter((o) => o._sync !== 'ok' || idsRemotos.has(o.id)); // apagado em outro aparelho
+    for (const r of remotos) {
+      const i = lista.findIndex((o) => o.id === r.id);
+      const novo = { ...escolher(r, CAMPOS_ORC), _sync: 'ok' };
+      if (i < 0) lista.push(novo);
+      else if (lista[i]._sync === 'ok' && Date.parse(r.updated_at) > Date.parse(lista[i].updated_at)) lista[i] = novo;
+    }
+    gravar(K.orcamentos, lista);
+    return { ok: true };
+  } catch (e) {
+    console.error('Falha na sincronização', e);
+    return { ok: false, motivo: 'erro', erro: e };
+  }
+}
