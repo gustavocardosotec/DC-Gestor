@@ -17,7 +17,7 @@
  */
 
 import { supabase } from './supabase.js';
-import { initAuthUI, loginWithGoogle, loginWithEmail, logout } from './auth.js';
+import { initAuthUI, loginWithGoogle, logout } from './auth.js';
 import { salvarRascunho, listarRascunhos, removerRascunho, limparTodosRascunhos, verificarEstadoOffline, salvarPreferenciasUsuario, listarPreferencias } from './storage.js';
 import { formatarMoeda, formatarNumero, formatarQuantidade, parseMoeda, calcularValorTotalItem, calcularValorTotalOrcamento, encontrarMelhorCotacao, calcularEconomiaTotal, validarOrcamento, gerarId, gerarCodigoOrcamento } from './utils.js';
 import { gerarEExportarOrcamento } from './pdf.js';
