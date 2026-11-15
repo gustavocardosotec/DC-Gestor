@@ -1,0 +1,6 @@
+ # Pastas/Arquivos a ignorar
+  .env
+  .DS_Store
+  node_modules
+  .claude/
+  sql/temp/
