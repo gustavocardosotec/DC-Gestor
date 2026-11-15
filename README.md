@@ -8,20 +8,6 @@ Aplicativo web mobile-first para gestão de orçamentos elétricos residenciais.
 - **Deploy:** Vercel
 - **Repositório:** https://github.com/gustavocardosotec/DC-Gestor.git
 
-## Estrutura do App
-```
-DC Gestor/
-├── index.html
-├── css/
-├── js/
-│   ├── supabase.js
-│   ├── auth.js
-│   ├── pdf.js
-│   └── utils.js
-└── assets/
-    ├── img/
-    └── logos-bancos/
-```
 
 ## Funcionalidades
 1. Levantamento técnico em campo (offline-first)
