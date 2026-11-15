@@ -12,7 +12,7 @@
  * @version 1.0.0 (v1.0 Alfa)
  */
 
-const CACHE_NAME = 'dc-gestor-v1-alpha-2';
+const CACHE_NAME = 'dc-gestor-v1-alpha-3';
 const ASSETS_CRITICOS = [
     // Assets essenciais que devem sempre estar disponíveis offline
     '/',
@@ -21,6 +21,9 @@ const ASSETS_CRITICOS = [
     '/js/supabase.js',
     '/js/auth.js',
     '/js/storage.js',
+    '/js/utils.js',
+    '/js/pdf.js',
+    '/js/supabase-lib.js',
     '/manifest.json',
     '/sw.js',
 ];
@@ -82,69 +85,17 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // Estratégia: Cache First para navegador/same-origin requests
+    // Estratégia: Network First (sempre pega a versão nova; se estiver offline, usa o cache)
     event.respondWith(
-        caches.match(event.request)
-            .then((cachedResponse) => {
-                // Se encontrado em cache, retorna do cache
-                if (cachedResponse) {
-                    // Para navegações e requests GET, também busca atualização em background
-                    if (event.request.method === 'GET') {
-                        const fetchPromise = fetch(event.request)
-                            .then((networkResponse) => {
-                                // Atualiza cache em segundo plano (não bloqueia a resposta)
-                                if (networkResponse.ok) {
-                                    const cloned = networkResponse.clone();
-                                    caches.open(CACHE_NAME)
-                                        .then((cache) => {
-                                            cache.put(event.request, cloned).catch(
-                                                (err) => console.log('Cache update failed:', err)
-                                            );
-                                        });
-                                }
-                                return networkResponse;
-                            })
-                            .catch((err) => {
-                                console.log('Fetch error, serving from cache:', err);
-                                return null;
-                            });
-
-                        // Retorna cache imediatamente, atualiza background
-                        return cachedResponse || fetchPromise;
-                    }
-
-                    return cachedResponse;
+        fetch(event.request)
+            .then((networkResponse) => {
+                if (networkResponse.ok) {
+                    const cloned = networkResponse.clone();
+                    caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
                 }
-
-                // Se não está em cache, busca na rede
-                return fetch(event.request)
-                    .then((networkResponse) => {
-                        // Não cachear respostas de erro ou não-GET
-                        if (event.request.method === 'GET' && networkResponse.ok) {
-                            const cloned = networkResponse.clone();
-                            caches.open(CACHE_NAME)
-                                .then((cache) => {
-                                    cache.put(event.request, cloned).catch(
-                                        (err) => console.log('Cache put failed:', err)
-                                    );
-                                });
-                        }
-                        return networkResponse;
-                    })
-                    .catch((err) => {
-                        console.error('❌ Service Worker: Erro na rede:', err);
-
-                        // Se falhou na rede e estamos offline, tenta do cache
-                        if (event.request.method === 'GET') {
-                            return cachedResponse || (
-                                caches.match(event.request)
-                                    .then((r) => r || offlineFallback(event.request))
-                            );
-                        }
-
-                        throw err;
-                    });
+                return networkResponse;
             })
+            .catch(() => caches.match(event.request).then((r) => r || offlineFallback(event.request)))
     );
 });
 
@@ -158,7 +109,7 @@ self.addEventListener('fetch', (event) => {
  */
 function offlineFallback(request) {
     // Para navegações (HTML), retorna a página offline básica
-    if (request.mode === 'navigate' || (request.method === 'GET' && request.headers.get('accept').includes('text/html'))) {
+    if (request.mode === 'navigate' || (request.method === 'GET' && (request.headers.get('accept') || '').includes('text/html'))) {
         return caches.match('/index.html')
             .then((response) => {
                 if (response) return response;

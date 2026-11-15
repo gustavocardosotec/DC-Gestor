@@ -90,7 +90,7 @@ export function listarRascunhos() {
         const rascunhos = JSON.parse(dados);
 
         // Filtra apenas registros válidos (com ID e dados mínimos)
-        return rascunhos.filter(r => r && r.id && r.tituloObra).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+        return rascunhos.filter(r => r && r.id && (r.tituloObra || r.titulo_obra)).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
     } catch (err) {
         console.error('❌ Erro ao listar rascunhos:', err);
         return [];

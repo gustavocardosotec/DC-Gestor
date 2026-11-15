@@ -1010,6 +1010,7 @@ function configurarEventos(elements) {
         btn.addEventListener('click', () => {
             const tabId = btn.getAttribute('data-tab');
             mostrarTab(tabId, { tabButtons, tabSections });
+            if (tabId === 'orcamentos') renderizarListaOrcamentos(elements);
         });
     });
 
@@ -1017,16 +1018,22 @@ function configurarEventos(elements) {
     // Autenticação (gerenciada pelo auth.js via eventos customizados)
     // ======================
     // Escuta eventos de login/logout do auth.js
+    let abaInicialDefinida = false; // abre a aba Orçamentos só no primeiro login
     window.addEventListener('auth:login', (e) => {
         const { user } = e.detail;
         console.log('🔐 App: Login detectado', user?.email);
         // App já está visível via auth.js, apenas garante estado
         tabButtons.forEach(btn => btn.classList.remove('hidden'));
-        if (elements.btnGerarPDF) elements.btnGerarPDF.disabled = false;
+        if (!abaInicialDefinida) {
+            mostrarTab('orcamentos', { tabButtons, tabSections });
+            renderizarListaOrcamentos(elements);
+            abaInicialDefinida = true;
+        }
     });
 
     window.addEventListener('auth:logout', () => {
         console.log('🔓 App: Logout detectado');
+        abaInicialDefinida = false;
         // Limpa estado do orçamento atual
         novoOrcamento(elements);
     });

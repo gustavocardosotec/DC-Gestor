@@ -8,7 +8,7 @@
  * @version 1.0.0 (v1.0 Alfa)
  */
 
-import { formatarMoeda, formatarData, formatarDataHora, formatarQuantidade, gerarCodigoOrcamento, gerarPayloadPix, getLogoBanco, processarTemplateWhatsApp, gerarLinkWhatsApp, encontrarMelhorCotacao, calcularEconomiaTotal } from './utils.js';
+import { formatarMoeda, formatarData, formatarDataHora, formatarQuantidade, gerarCodigoOrcamento, gerarPayloadPix, getLogoBanco, processarTemplateWhatsApp, gerarLinkWhatsApp, encontrarMelhorCotacao, calcularEconomiaTotal, validarOrcamento } from './utils.js';
 
 // ============================================================================
 // CONFIGURAÇÕES DO PDF
@@ -410,10 +410,45 @@ function desenharTotais(doc, orcamento, y) {
 }
 
 /**
+ * Gera o QR Code (PNG em base64) localmente com a biblioteca qrcode-generator.
+ *
+ * @param {string} texto - Conteúdo do QR Code (payload Pix).
+ * @returns {Promise<string>} Data URL PNG.
+ */
+async function gerarQrBase64(texto) {
+    if (!window.qrcode) {
+        await new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+            s.onload = resolve;
+            s.onerror = () => reject(new Error('Falha ao carregar biblioteca de QR Code'));
+            document.head.appendChild(s);
+        });
+    }
+    const qr = window.qrcode(0, 'H'); // correção alta: aguenta o logo no centro
+    qr.addData(texto);
+    qr.make();
+    const n = qr.getModuleCount();
+    const cell = 8, borda = 2 * cell, tam = n * cell + borda * 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = tam;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, tam, tam);
+    ctx.fillStyle = '#000';
+    for (let r = 0; r < n; r++) {
+        for (let c = 0; c < n; c++) {
+            if (qr.isDark(r, c)) ctx.fillRect(borda + c * cell, borda + r * cell, cell, cell);
+        }
+    }
+    return canvas.toDataURL('image/png');
+}
+
+/**
  * Desenha QR Code Pix + botão WhatsApp.
  */
 async function desenharPixEWhatsApp(doc, orcamento, empresa, y) {
-    const { margin, pageWidth, colors } = PDF_CONFIG;
+    const { margin, pageWidth, contentWidth, colors } = PDF_CONFIG;
     const leftX = margin;
     const rightX = pageWidth - margin;
     const centerX = pageWidth / 2;
@@ -444,19 +479,9 @@ async function desenharPixEWhatsApp(doc, orcamento, empresa, y) {
         banco: bancoKey
     });
 
-    // Gera QR Code usando API do Google Charts (simples, sem dependência extra)
-    // Nota: Em produção, usar biblioteca local como qrcode.js
-    const qrCodeUrl = `https://chart.googleapis.com/chart?chs=150x150&cht=qr&chl=${encodeURIComponent(payload)}&choe=M`;
-
     try {
-        // Tenta carregar QR Code como imagem
-        const qrResponse = await fetch(qrCodeUrl);
-        const qrBlob = await qrResponse.blob();
-        const qrBase64 = await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result);
-            reader.readAsDataURL(qrBlob);
-        });
+        // QR Code gerado localmente (a API antiga do Google Charts foi desativada)
+        const qrBase64 = await gerarQrBase64(payload);
 
         // Logo do banco no centro do QR Code
         const logoBancoPath = getLogoBanco(bancoKey);
@@ -637,7 +662,12 @@ export async function gerarEExportarOrcamento(elements, estadoApp) {
         };
 
         // Validação
-        const validacao = validarOrcamento(orcamento);
+        const validacao = validarOrcamento({
+            tituloObra: orcamento.titulo_obra,
+            clienteNome: orcamento.cliente_nome,
+            clienteTelefone: orcamento.cliente_telefone,
+            itens: orcamento.itens
+        });
         if (!validacao.valido) {
             alert('Erro na validação:\n' + validacao.erros.join('\n'));
             return false;
@@ -653,8 +683,6 @@ export async function gerarEExportarOrcamento(elements, estadoApp) {
         // Atualiza status no estado local
         orcamento.status = 'enviado';
         orcamento.updatedAt = new Date().toISOString();
-        const { salvarRascunho } = await import('./storage.js');
-        await salvarRascunho(orcamento);
 
         alert('✅ Orçamento PDF gerado e salvo com sucesso!');
         return true;
