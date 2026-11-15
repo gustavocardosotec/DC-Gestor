@@ -341,9 +341,6 @@ function updateAuthUI(event, session) {
         // Esconde abas de navegação
         navButtons.forEach(btn => btn.classList.add('hidden'));
 
-        // Reset das abas de login para e-mail
-        trocarAbaLogin('email');
-
         // Dispara evento customizado
         window.dispatchEvent(new CustomEvent('auth:logout'));
     }
