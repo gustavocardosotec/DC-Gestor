@@ -73,6 +73,8 @@ export function initAuthUI() {
 
     // Cacheia elementos
     authElements = {
+        loginFormEmail: document.getElementById('login-form-email'),
+        criarTermos: document.getElementById('criar-termos'),
         loginOverlay,
         appContainer,
         loginEmail,
@@ -241,26 +243,6 @@ function configurarEventosAuth() {
         formCriarConta.addEventListener('submit', async (e) => {
             e.preventDefault();
             await handleCriarConta();
-        });
-    }
-
-    // ======================
-    // Login Google
-    // ======================
-    if (btnLoginGoogle) {
-        btnLoginGoogle.addEventListener('click', async (e) => {
-            e.preventDefault();
-            await loginWithGoogle();
-        });
-    }
-
-    // ======================
-    // Esqueci a senha
-    // ======================
-    if (btnEsqueciSenha) {
-        btnEsqueciSenha.addEventListener('click', async (e) => {
-            e.preventDefault();
-            await handleRecuperarSenha();
         });
     }
 
@@ -766,4 +748,3 @@ export async function getUserId() {
 }
 
 // Exporta tipos úteis para uso externo se necessário
-export type { AuthError } from '@supabase/supabase-js';
