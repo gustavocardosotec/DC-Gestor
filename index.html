@@ -128,14 +128,8 @@
 
                 <!-- Corpo do Card -->
                 <div class="p-6 space-y-5">
-                    <!-- Abas de Login -->
-                    <div class="flex border-b border-slate-200" role="tablist">
-                        <button id="tab-login-email" data-login-tab="email" class="flex-1 py-3 text-center text-sm font-medium text-primary border-b-2 border-primary" role="tab" aria-selected="true">E-mail e Senha</button>
-                        <button id="tab-login-google" data-login-tab="google" class="flex-1 py-3 text-center text-sm font-medium text-slate-400 border-b-2 border-transparent hover:text-slate-600" role="tab" aria-selected="false">Continuar com Google</button>
-                    </div>
-
                     <!-- Formulário E-mail/Senha -->
-                    <div id="login-form-email" class="space-y-4" role="tabpanel">
+                    <div id="login-form-email" class="space-y-4">
                         <div>
                             <label for="login-email" class="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
                             <input type="email" id="login-email" autocomplete="email" required placeholder="seu@email.com" class="touch-target w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors text-base">
@@ -172,10 +166,8 @@
                         </button>
                     </div>
 
-                    <!-- Formulário Google (apenas botão) -->
-                    <div id="login-form-google" class="space-y-4 hidden" role="tabpanel">
-                        <p class="text-center text-sm text-slate-500">Faça login com sua conta Google para acessar o DC Gestor</p>
-
+                    <!-- Botão Google (direto no formulário de email) -->
+                    <div class="space-y-3 pt-2">
                         <button id="btn-login-google" class="touch-target w-full py-3 rounded-lg border border-slate-300 bg-white text-slate-700 font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-3">
                             <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" width="20" height="20">
                             <span>Continuar com Google</span>
@@ -196,7 +188,7 @@
 
                     <!-- Criar conta -->
                     <p class="text-center text-sm text-slate-600">
-                        Não tem conta? <a href="#" id="btn-criar-conta" class="text-primary font-medium hover:underline">Criar conta grátis</a>
+                        Não tem conta? <button id="btn-criar-conta" type="button" class="text-primary font-medium hover:underline">Criar conta grátis</button>
                     </p>
                 </div>
             </div>
@@ -598,6 +590,76 @@
 
     </div> <!-- Fim #app-container -->
     </div> <!-- Fim #main-content -->
+
+    <!-- Modal Criar Conta -->
+    <div id="modal-criar-conta" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto animation-fade-in-up">
+            <!-- Header do Modal -->
+            <div class="flex items-center justify-between p-4 border-b border-slate-200 sticky top-0 bg-white z-10 rounded-t-xl">
+                <h3 class="text-lg font-semibold text-dark">Criar Conta</h3>
+                <button id="modal-criar-conta-fechar" class="touch-target p-1 rounded-lg hover:bg-slate-100 transition-colors" aria-label="Fechar">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Formulário Criar Conta -->
+            <form id="form-criar-conta" class="p-6 space-y-4">
+                <div>
+                    <label for="criar-nome" class="block text-sm font-medium text-slate-700 mb-1">Nome completo</label>
+                    <input type="text" id="criar-nome" autocomplete="name" required placeholder="Seu nome completo" class="touch-target w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors text-base">
+                </div>
+
+                <div>
+                    <label for="criar-email" class="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
+                    <input type="email" id="criar-email" autocomplete="email" required placeholder="seu@email.com" class="touch-target w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors text-base">
+                </div>
+
+                <div>
+                    <label for="criar-senha" class="block text-sm font-medium text-slate-700 mb-1">Senha</label>
+                    <div class="relative">
+                        <input type="password" id="criar-senha" autocomplete="new-password" required minlength="6" placeholder="Mínimo 6 caracteres" class="touch-target w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors text-base pr-12">
+                        <button type="button" id="btn-toggle-criar-senha" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="Mostrar/ocultar senha">
+                            <svg id="icon-olho-criar" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-1">Mínimo 6 caracteres</p>
+                </div>
+
+                <div>
+                    <label for="criar-confirmar-senha" class="block text-sm font-medium text-slate-700 mb-1">Confirmar senha</label>
+                    <div class="relative">
+                        <input type="password" id="criar-confirmar-senha" autocomplete="new-password" required placeholder="Repita a senha" class="touch-target w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors text-base pr-12">
+                        <button type="button" id="btn-toggle-confirmar-senha" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="Mostrar/ocultar senha">
+                            <svg id="icon-olho-confirmar" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="criar-termos" class="touch-target w-4 h-4 text-primary border-slate-300 rounded focus:ring-primary" required>
+                    <label for="criar-termos" class="text-sm text-slate-600 cursor-pointer">Concordo com os <a href="#" class="text-primary hover:underline">Termos de Uso</a> e <a href="#" class="text-primary hover:underline">Política de Privacidade</a></label>
+                </div>
+
+                <button type="submit" id="btn-confirmar-criar-conta" class="touch-target w-full py-3 rounded-lg bg-primary text-white font-semibold hover:bg-orange-600 transition-colors flex items-center justify-center gap-2">
+                    <span>Criar minha conta</span>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                </button>
+
+                <p class="text-center text-sm text-slate-500">Já tem conta? <button type="button" id="btn-voltar-login" class="text-primary font-medium hover:underline">Entrar</button></p>
+            </form>
+        </div>
+    </div>
 
     <!-- Service Worker Registration -->
     <script>

@@ -29,12 +29,6 @@ export function initAuthUI() {
     const loginOverlay = document.getElementById('login-overlay');
     const appContainer = document.getElementById('app-container');
 
-    // Abas de login
-    const tabLoginEmail = document.getElementById('tab-login-email');
-    const tabLoginGoogle = document.getElementById('tab-login-google');
-    const loginFormEmail = document.getElementById('login-form-email');
-    const loginFormGoogle = document.getElementById('login-form-google');
-
     // Formulário E-mail/Senha
     const loginEmail = document.getElementById('login-email');
     const loginSenha = document.getElementById('login-senha');
@@ -47,8 +41,23 @@ export function initAuthUI() {
     // Botão Google
     const btnLoginGoogle = document.getElementById('btn-login-google');
 
-    // Criar conta
+    // Criar conta (abre modal)
     const btnCriarConta = document.getElementById('btn-criar-conta');
+
+    // Modal Criar Conta
+    const modalCriarConta = document.getElementById('modal-criar-conta');
+    const modalCriarContaFechar = document.getElementById('modal-criar-conta-fechar');
+    const formCriarConta = document.getElementById('form-criar-conta');
+    const criarNome = document.getElementById('criar-nome');
+    const criarEmail = document.getElementById('criar-email');
+    const criarSenha = document.getElementById('criar-senha');
+    const criarConfirmarSenha = document.getElementById('criar-confirmar-senha');
+    const btnToggleCriarSenha = document.getElementById('btn-toggle-criar-senha');
+    const iconOlhoCriar = document.getElementById('icon-olho-criar');
+    const btnToggleConfirmarSenha = document.getElementById('btn-toggle-confirmar-senha');
+    const iconOlhoConfirmar = document.getElementById('icon-olho-confirmar');
+    const btnConfirmarCriarConta = document.getElementById('btn-confirmar-criar-conta');
+    const btnVoltarLogin = document.getElementById('btn-voltar-login');
 
     // Header/App
     const btnLogout = document.getElementById('btn-logout');
@@ -66,10 +75,6 @@ export function initAuthUI() {
     authElements = {
         loginOverlay,
         appContainer,
-        tabLoginEmail,
-        tabLoginGoogle,
-        loginFormEmail,
-        loginFormGoogle,
         loginEmail,
         loginSenha,
         btnToggleSenha,
@@ -79,6 +84,19 @@ export function initAuthUI() {
         loginLembrar,
         btnLoginGoogle,
         btnCriarConta,
+        modalCriarConta,
+        modalCriarContaFechar,
+        formCriarConta,
+        criarNome,
+        criarEmail,
+        criarSenha,
+        criarConfirmarSenha,
+        btnToggleCriarSenha,
+        iconOlhoCriar,
+        btnToggleConfirmarSenha,
+        iconOlhoConfirmar,
+        btnConfirmarCriarConta,
+        btnVoltarLogin,
         btnLogout,
         userAvatar,
         userName,
@@ -104,28 +122,23 @@ export function initAuthUI() {
  */
 function configurarEventosAuth() {
     const {
-        tabLoginEmail, tabLoginGoogle, loginFormEmail, loginFormGoogle,
         btnToggleSenha, iconOlho, loginSenha,
         btnEntrar, btnEsqueciSenha, btnLoginGoogle, btnCriarConta,
+        modalCriarConta, modalCriarContaFechar, formCriarConta,
+        criarSenha, criarConfirmarSenha,
+        btnToggleCriarSenha, iconOlhoCriar,
+        btnToggleConfirmarSenha, iconOlhoConfirmar,
+        btnConfirmarCriarConta, btnVoltarLogin,
         btnLogout
     } = authElements;
 
     // ======================
-    // Abas de Login (E-mail vs Google)
-    // ======================
-    if (tabLoginEmail && tabLoginGoogle) {
-        tabLoginEmail.addEventListener('click', () => trocarAbaLogin('email'));
-        tabLoginGoogle.addEventListener('click', () => trocarAbaLogin('google'));
-    }
-
-    // ======================
-    // Mostrar/ocultar senha
+    // Mostrar/ocultar senha (Login)
     // ======================
     if (btnToggleSenha && loginSenha && iconOlho) {
         btnToggleSenha.addEventListener('click', () => {
             const isPassword = loginSenha.type === 'password';
             loginSenha.type = isPassword ? 'text' : 'password';
-            // Troca ícone
             iconOlho.innerHTML = isPassword
                 ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'
                 : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
@@ -175,12 +188,79 @@ function configurarEventosAuth() {
     }
 
     // ======================
-    // Criar conta (signup)
+    // Abrir modal Criar Conta
     // ======================
     if (btnCriarConta) {
-        btnCriarConta.addEventListener('click', async (e) => {
+        btnCriarConta.addEventListener('click', (e) => {
+            e.preventDefault();
+            abrirModalCriarConta();
+        });
+    }
+
+    // ======================
+    // Modal Criar Conta - Fechar
+    // ======================
+    if (modalCriarContaFechar) {
+        modalCriarContaFechar.addEventListener('click', fecharModalCriarConta);
+    }
+    if (btnVoltarLogin) {
+        btnVoltarLogin.addEventListener('click', fecharModalCriarConta);
+    }
+    if (modalCriarConta) {
+        modalCriarConta.addEventListener('click', (e) => {
+            if (e.target === modalCriarConta) fecharModalCriarConta();
+        });
+    }
+
+    // ======================
+    // Mostrar/ocultar senha (Criar Conta)
+    // ======================
+    if (btnToggleCriarSenha && criarSenha && iconOlhoCriar) {
+        btnToggleCriarSenha.addEventListener('click', () => {
+            const isPassword = criarSenha.type === 'password';
+            criarSenha.type = isPassword ? 'text' : 'password';
+            iconOlhoCriar.innerHTML = isPassword
+                ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'
+                : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+        });
+    }
+    if (btnToggleConfirmarSenha && criarConfirmarSenha && iconOlhoConfirmar) {
+        btnToggleConfirmarSenha.addEventListener('click', () => {
+            const isPassword = criarConfirmarSenha.type === 'password';
+            criarConfirmarSenha.type = isPassword ? 'text' : 'password';
+            iconOlhoConfirmar.innerHTML = isPassword
+                ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'
+                : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+        });
+    }
+
+    // ======================
+    // Submit Criar Conta
+    // ======================
+    if (formCriarConta) {
+        formCriarConta.addEventListener('submit', async (e) => {
             e.preventDefault();
             await handleCriarConta();
+        });
+    }
+
+    // ======================
+    // Login Google
+    // ======================
+    if (btnLoginGoogle) {
+        btnLoginGoogle.addEventListener('click', async (e) => {
+            e.preventDefault();
+            await loginWithGoogle();
+        });
+    }
+
+    // ======================
+    // Esqueci a senha
+    // ======================
+    if (btnEsqueciSenha) {
+        btnEsqueciSenha.addEventListener('click', async (e) => {
+            e.preventDefault();
+            await handleRecuperarSenha();
         });
     }
 
@@ -195,34 +275,31 @@ function configurarEventosAuth() {
     }
 }
 
-/**
- * Troca entre as abas de login (E-mail/Senha ↔ Google).
- *
- * @param {string} aba - 'email' ou 'google'
- */
-function trocarAbaLogin(aba) {
-    const { tabLoginEmail, tabLoginGoogle, loginFormEmail, loginFormGoogle } = authElements;
+// ======================
+// Modal Criar Conta - Helpers
+// ======================
+function abrirModalCriarConta() {
+    const { modalCriarConta, formCriarConta, criarNome } = authElements;
+    if (!modalCriarConta) return;
 
-    if (aba === 'email') {
-        tabLoginEmail.classList.add('text-primary', 'border-primary');
-        tabLoginEmail.classList.remove('text-slate-400', 'border-transparent');
-        tabLoginEmail.setAttribute('aria-selected', 'true');
-        tabLoginGoogle.classList.remove('text-primary', 'border-primary');
-        tabLoginGoogle.classList.add('text-slate-400', 'border-transparent');
-        tabLoginGoogle.setAttribute('aria-selected', 'false');
-        loginFormEmail.classList.remove('hidden');
-        loginFormGoogle.classList.add('hidden');
-    } else {
-        tabLoginGoogle.classList.add('text-primary', 'border-primary');
-        tabLoginGoogle.classList.remove('text-slate-400', 'border-transparent');
-        tabLoginGoogle.setAttribute('aria-selected', 'true');
-        tabLoginEmail.classList.remove('text-primary', 'border-primary');
-        tabLoginEmail.classList.add('text-slate-400', 'border-transparent');
-        tabLoginEmail.setAttribute('aria-selected', 'false');
-        loginFormGoogle.classList.remove('hidden');
-        loginFormEmail.classList.add('hidden');
-    }
+    formCriarConta?.reset();
+    modalCriarConta.classList.remove('hidden');
+    modalCriarConta.classList.add('flex');
+    document.body.style.overflow = 'hidden';
+
+    setTimeout(() => criarNome?.focus(), 100);
 }
+
+function fecharModalCriarConta() {
+    const { modalCriarConta } = authElements;
+    if (!modalCriarConta) return;
+
+    modalCriarConta.classList.add('hidden');
+    modalCriarConta.classList.remove('flex');
+    document.body.style.overflow = '';
+}
+
+// Remove a função trocarAbaLogin (não é mais necessária)
 
 /**
  * Atualiza a visibilidade dos elementos da interface baseada no estado de login.
@@ -460,40 +537,79 @@ async function handleRecuperarSenha() {
 }
 
 /**
- * Cria nova conta (signup com e-mail/senha).
+ * Cria nova conta (signup com e-mail/senha) - usa o modal.
  */
 async function handleCriarConta() {
-    const { loginEmail, loginSenha, btnCriarConta } = authElements;
-    const email = loginEmail?.value?.trim();
-    const senha = loginSenha?.value;
+    const { criarNome, criarEmail, criarSenha, criarConfirmarSenha, btnConfirmarCriarConta, formCriarConta } = authElements;
 
-    if (!email || !senha) {
-        mostrarErroLogin('Preencha e-mail e senha para criar a conta.');
+    const nome = criarNome?.value?.trim();
+    const email = criarEmail?.value?.trim();
+    const senha = criarSenha?.value;
+    const confirmarSenha = criarConfirmarSenha?.value;
+
+    // Validações
+    if (!nome) {
+        mostrarErroLogin('Digite seu nome completo.');
+        criarNome?.focus();
+        return;
+    }
+
+    if (!email) {
+        mostrarErroLogin('Digite seu e-mail.');
+        criarEmail?.focus();
         return;
     }
 
     if (!validarEmail(email)) {
         mostrarErroLogin('E-mail inválido.');
-        loginEmail?.focus();
+        criarEmail?.focus();
+        return;
+    }
+
+    if (!senha) {
+        mostrarErroLogin('Digite uma senha.');
+        criarSenha?.focus();
         return;
     }
 
     if (senha.length < 6) {
         mostrarErroLogin('A senha deve ter pelo menos 6 caracteres.');
-        loginSenha?.focus();
+        criarSenha?.focus();
+        return;
+    }
+
+    if (senha !== confirmarSenha) {
+        mostrarErroLogin('As senhas não conferem. Digite novamente.');
+        criarConfirmarSenha?.focus();
+        return;
+    }
+
+    // Verifica se aceitou termos
+    const termos = authElements.criarTermos?.checked;
+    if (!termos) {
+        mostrarErroLogin('Você deve aceitar os Termos de Uso e Política de Privacidade.');
         return;
     }
 
     try {
-        if (btnCriarConta) {
-            btnCriarConta.textContent = 'Criando...';
-            btnCriarConta.classList.add('pointer-events-none', 'opacity-50');
+        if (btnConfirmarCriarConta) {
+            btnConfirmarCriarConta.disabled = true;
+            btnConfirmarCriarConta.innerHTML = `
+                <svg class="animate-spin h-5 w-5 mr-2" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                <span>Criando...</span>
+            `;
         }
 
         const { data, error } = await supabase.auth.signUp({
             email,
             password: senha,
             options: {
+                data: {
+                    full_name: nome
+                },
                 emailRedirectTo: window.location.origin + window.location.pathname
             }
         });
@@ -509,6 +625,7 @@ async function handleCriarConta() {
             mostrarErroLogin(msg);
         } else {
             console.log('✅ Conta criada:', data.user?.id);
+            fecharModalCriarConta();
             if (data.user?.identities?.length === 0) {
                 mostrarSucessoLogin('Conta já existe. Enviamos um link de confirmação para seu e-mail.');
             } else {
@@ -519,9 +636,14 @@ async function handleCriarConta() {
         console.error('❌ Exceção ao criar conta:', err);
         mostrarErroLogin('Erro inesperado. Tente novamente.');
     } finally {
-        if (btnCriarConta) {
-            btnCriarConta.textContent = 'Criar conta grátis';
-            btnCriarConta.classList.remove('pointer-events-none', 'opacity-50');
+        if (btnConfirmarCriarConta) {
+            btnConfirmarCriarConta.disabled = false;
+            btnConfirmarCriarConta.innerHTML = `
+                <span>Criar minha conta</span>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 5v14M5 12h14"/>
+                </svg>
+            `;
         }
     }
 }
