@@ -26,6 +26,9 @@ const SUPABASE_ANON_KEY = 'sb_publishable_PZCpFohy1s3iaMkspo4Qng_tHthv1RM';
  *
  * @returns {import('@supabase/supabase-js').SupabaseClient} Cliente Supabase configurado.
  */
+// Cliente único (evita várias instâncias do GoTrueClient)
+let clienteUnico = null;
+
 export function createClient() {
     if (!SUPABASE_URL || SUPABASE_URL.includes('SUPABASE-PROJECT-ref')) {
         console.warn('⚠️ Aviso: URL do Supabase não configurada. Verifique o arquivo js/supabase.js.');
@@ -35,8 +38,14 @@ export function createClient() {
         console.warn('⚠️ Aviso: Chave anonima do Supabase não configurada. Verifique o arquivo js/supabase.js.');
     }
 
-    const { createClient } = supabase;
-    return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // Biblioteca carregada via CDN no index.html (global window.supabase)
+    if (!window.supabase?.createClient) {
+        throw new Error('supabase-js não carregou. Verifique o <script> do CDN no index.html.');
+    }
+    if (!clienteUnico) {
+        clienteUnico = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    }
+    return clienteUnico;
 }
 
 // Exporta o cliente para importação direta se necessário
@@ -92,5 +101,3 @@ export async function getUserId() {
     return user?.id ?? null;
 }
 
-// Exporta utilitários para uso externo se necessário
-export { formatError };
