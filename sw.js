@@ -12,7 +12,7 @@
  * @version 1.0.0 (v1.0 Alfa)
  */
 
-const CACHE_NAME = 'dc-gestor-v1-alpha';
+const CACHE_NAME = 'dc-gestor-v1-alpha-2';
 const ASSETS_CRITICOS = [
     // Assets essenciais que devem sempre estar disponíveis offline
     '/',
@@ -77,13 +77,9 @@ self.addEventListener('fetch', (event) => {
     // Pular requisições para terceiros ou API endpoints que não devemos cachear
     const url = new URL(event.request.url);
 
-    // Apenas cachear requests na mesma origem
-    if (url.origin !== self.location.origin && !url.origin.includes('supabase')) {
-        // Permitir requisições para API do Supabase sem interferir
-        if (url.pathname.startsWith('/auth/) || url.pathname.includes('functions')) {
-            // Não interceptar chamadas de função ou auth do Supabase
-            return;
-        }
+    // Só intercepta GET da mesma origem (CDN, fontes e Supabase passam direto pela rede)
+    if (event.request.method !== 'GET' || url.origin !== self.location.origin) {
+        return;
     }
 
     // Estratégia: Cache First para navegador/same-origin requests
@@ -103,7 +99,8 @@ self.addEventListener('fetch', (event) => {
                                         .then((cache) => {
                                             cache.put(event.request, cloned).catch(
                                                 (err) => console.log('Cache update failed:', err)
-                                        ));
+                                            );
+                                        });
                                 }
                                 return networkResponse;
                             })
@@ -161,7 +158,7 @@ self.addEventListener('fetch', (event) => {
  */
 function offlineFallback(request) {
     // Para navegações (HTML), retorna a página offline básica
-    if (request.mode === 'navigate' || (request.method === 'GET' && request.headers.get('accept') includes('text/html'))) {
+    if (request.mode === 'navigate' || (request.method === 'GET' && request.headers.get('accept').includes('text/html'))) {
         return caches.match('/index.html')
             .then((response) => {
                 if (response) return response;
