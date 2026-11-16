@@ -139,7 +139,6 @@ export function obterPerfilEmpresa() {
   // Contas Pix e WhatsApps vêm do perfil pessoal se a empresa ainda não tiver próprios
   if (!Array.isArray(p.pix_contas) || !p.pix_contas.length) {
     p.pix_contas = pessoal.pix_contas;
-    if (!p.pix_padrao_id) p.pix_padrao_id = pessoal.pix_padrao_id;
   }
   if (!Array.isArray(p.whatsapps) || !p.whatsapps.length) {
     p.whatsapps = pessoal.whatsapps;

@@ -393,9 +393,10 @@ function renderLevantamento() {
   }
   const o = estado.rascunho;
   const perfilAtual = perfilDoRegistro(o);
-  const pixSelecionado = o.pix_id || perfilAtual.pix_padrao_id;
+  const pixSelecionado = o.pix_id !== undefined ? o.pix_id : (perfilAtual.pix_padrao_id || '');
   const pixOpcoes = perfilAtual.pix_contas.length
-    ? perfilAtual.pix_contas.map((c) => `<option value="${c.id}" ${pixSelecionado === c.id ? 'selected' : ''}>${esc(c.apelido)} • ${esc(obterBanco(c.banco).nome)}</option>`).join('')
+    ? '<option value="" ' + (!pixSelecionado ? 'selected' : '') + '>Selecione um Pix</option>' +
+      perfilAtual.pix_contas.map((c) => `<option value="${c.id}" ${pixSelecionado === c.id ? 'selected' : ''}>${esc(c.apelido)} • ${esc(obterBanco(c.banco).nome)}</option>`).join('')
     : '<option value="">Nenhum Pix cadastrado</option>';
   const num = (campo, rotulo) => entrada('campo', campo, rotulo, numParaInput(o[campo]), { modo: 'decimal', ph: '0' });
   const statusOpcoes = Object.entries(STATUS).map(([k, v]) => `<option value="${k}" ${o.status === k ? 'selected' : ''}>${v.nome}</option>`).join('');
@@ -749,7 +750,8 @@ function renderConfig() {
 // ---------- Formulário reutilizável de perfil (pessoal e empresa compartilhada) ----------
 function htmlFormularioPerfil(attr, p, opts) {
   const pixOpcoes = p.pix_contas.length
-    ? p.pix_contas.map((c) => `<option value="${c.id}" ${p.pix_padrao_id === c.id ? 'selected' : ''}>${esc(c.apelido)} • ${esc(obterBanco(c.banco).nome)}</option>`).join('')
+    ? '<option value="" ' + (!p.pix_padrao_id ? 'selected' : '') + '>Nenhum (selecionar no orçamento)</option>' +
+      p.pix_contas.map((c) => `<option value="${c.id}" ${p.pix_padrao_id === c.id ? 'selected' : ''}>${esc(c.apelido)} • ${esc(obterBanco(c.banco).nome)}</option>`).join('')
     : '<option value="">Cadastre um Pix primeiro</option>';
   const tensoes = ['127', '220', '380'].map((v) => `<option value="${v}" ${String(p.tensao) === v ? 'selected' : ''}>${v} V</option>`).join('');
   return `
@@ -948,7 +950,7 @@ function salvarFormPix() {
   const p = Store.obterPerfilAtivo(estado.escopo);
   if (f.id) p.pix_contas = p.pix_contas.map((c) => (c.id === f.id ? { ...f } : c));
   else { f.id = uuid(); p.pix_contas.push({ ...f }); }
-  if (!p.pix_contas.some((c) => c.id === p.pix_padrao_id)) p.pix_padrao_id = p.pix_contas[0].id;
+  if (p.pix_padrao_id && !p.pix_contas.some((c) => c.id === p.pix_padrao_id)) p.pix_padrao_id = '';
   gravarPerfil(p);
   fecharModal();
   renderConfig();
@@ -994,7 +996,7 @@ function excluirConta(tipo, id) {
   const p = Store.obterPerfilAtivo(estado.escopo);
   if (tipo === 'pix') {
     p.pix_contas = p.pix_contas.filter((c) => c.id !== id);
-    if (p.pix_padrao_id === id) p.pix_padrao_id = p.pix_contas[0]?.id || '';
+    if (p.pix_padrao_id === id) p.pix_padrao_id = '';
   } else {
     p.whatsapps = p.whatsapps.filter((w) => w.id !== id);
   }
@@ -1256,7 +1258,6 @@ function salvarOnboarding() {
   if (querPix) {
     const c = { ...f, id: uuid(), apelido: `Pix ${obterBanco(f.banco).nome}`, titular: f.titular.trim(), cidade: (f.cidade || '').trim() };
     p.pix_contas.push(c);
-    p.pix_padrao_id = c.id;
   }
   gravarPerfil(p);
   estado.onb = null;
