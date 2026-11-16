@@ -71,7 +71,8 @@ const porEscopo = (escopo) => (o) => !escopo || (escopo === 'empresa' ? !!o.empr
 export const listarOrcamentos = (escopo) =>
   todos().filter((o) => !o._del && porEscopo(escopo)(o)).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
 export const obterOrcamento = (id) => todos().find((o) => o.id === id && !o._del) || null;
-export const proximoNumero = () => todos().reduce((m, o) => Math.max(m, Number(o.numero) || 0), 0) + 1;
+export const proximoNumero = (escopo) =>
+  todos().filter((o) => !o._del && porEscopo(escopo)(o)).reduce((m, o) => Math.max(m, Number(o.numero) || 0), 0) + 1;
 export const contarPendentes = () => {
   const emp = obterEmpresa();
   return todos().filter((o) => o._sync === 'pendente' || o._del).length
@@ -106,7 +107,8 @@ const todasNotas = () => ler(K.notas, []);
 export const listarNotas = (escopo) =>
   todasNotas().filter((o) => !o._del && porEscopo(escopo)(o)).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
 export const obterNota = (id) => todasNotas().find((o) => o.id === id && !o._del) || null;
-export const proximoNumeroNota = () => todasNotas().reduce((m, o) => Math.max(m, Number(o.numero) || 0), 0) + 1;
+export const proximoNumeroNota = (escopo) =>
+  todasNotas().filter((o) => !o._del && porEscopo(escopo)(o)).reduce((m, o) => Math.max(m, Number(o.numero) || 0), 0) + 1;
 export function salvarNota(nota) {
   const lista = todasNotas();
   const registro = { ...escolher(nota, CAMPOS_NOTA), updated_at: agora(), _sync: 'pendente' };
