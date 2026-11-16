@@ -182,7 +182,9 @@ export function calcularTotais(orc) {
   const custo = round2(itens.reduce((s, i) => s + custoUnitario(i) * parseNum(i.qtd), 0));
   const maoDeObra = round2(parseNum(orc.mao_de_obra));
   const desconto = round2(parseNum(orc.desconto));
-  const acrescimo = round2(parseNum(orc.acrescimo));
+  const acrescimo = Array.isArray(orc.acrescimos)
+    ? round2(orc.acrescimos.reduce((s, a) => s + parseNum(a && a.valor), 0))
+    : round2(parseNum(orc.acrescimo));
   const total = Math.max(0, round2(subtotal + maoDeObra + acrescimo - desconto));
 
   // Comparativo: total de cada loja, só quando ela tem preço em todos os itens cotados
@@ -200,7 +202,15 @@ export const itemVazio = (n = 3) => ({ descricao: '', qtd: 1, lojas: Array(n).fi
 export const STATUS = {
   rascunho: { nome: 'Rascunho', cls: 'bg-slate-100 text-slate-600' },
   enviado: { nome: 'Enviado', cls: 'bg-blue-100 text-blue-700' },
-  aprovado: { nome: 'Aprovado', cls: 'bg-green-100 text-green-700' },
+  aceito: { nome: 'Aceito', cls: 'bg-green-100 text-green-700' },
+  em_andamento: { nome: 'Em andamento', cls: 'bg-amber-100 text-amber-700' },
+  pago: { nome: 'Pago', cls: 'bg-emerald-100 text-emerald-700' },
   recusado: { nome: 'Recusado', cls: 'bg-red-100 text-red-700' },
   concluido: { nome: 'Concluído', cls: 'bg-orange-100 text-orange-700' }
 };
+/** Chave de status válida (orçamentos antigos "aprovado" viram "aceito"). */
+export const statusDe = (o) => {
+  const k = o && o.status === 'aprovado' ? 'aceito' : o && o.status;
+  return STATUS[k] ? k : 'rascunho';
+};
+export const FORMAS_PGTO = ['Pix', 'Dinheiro', 'Cartão de crédito', 'Cartão de débito', 'Transferência', 'Boleto'];

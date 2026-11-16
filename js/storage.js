@@ -1,13 +1,21 @@
 // Motor offline-first: tudo grava no localStorage e sincroniza com o Supabase quando há sinal.
 import { hojeISO } from './utils.js';
+import { buscarMinhaEmpresa } from './equipe.js';
 
-const K = { orcamentos: 'dcg:orcamentos', perfil: 'dcg:perfil' };
+const K = { orcamentos: 'dcg:orcamentos', perfil: 'dcg:perfil', notas: 'dcg:notas', empresa: 'dcg:empresa' };
 
 export const CAMPOS_ORC = [
   'id', 'numero', 'status', 'cliente_nome', 'cliente_telefone', 'cliente_email', 'cliente_documento',
   'cliente_endereco', 'cliente_cep', 'cliente_bairro', 'cliente_cidade', 'cliente_estado',
   'obra_nome', 'observacoes', 'itens', 'lojas_nomes', 'margem_lucro', 'mao_de_obra', 'desconto',
-  'acrescimo', 'pix_id', 'valor_total', 'validade_dias', 'emitido_em', 'created_at', 'updated_at'
+  'acrescimo', 'tensao', 'empresa', 'acrescimos', 'mostrar_pix', 'forma_pagamento', 'pix_id', 'valor_total', 'validade_dias', 'emitido_em', 'created_at', 'updated_at',
+  'empresa_id', 'origem_id'
+];
+export const CAMPOS_NOTA = [
+  'id', 'empresa_id', 'origem_id', 'orcamento_id', 'numero', 'cliente_nome', 'cliente_telefone', 'cliente_email',
+  'cliente_documento', 'cliente_endereco', 'cliente_cep', 'cliente_bairro', 'cliente_cidade', 'cliente_estado',
+  'obra_nome', 'itens', 'desconto', 'valor_total', 'forma_pagamento', 'observacoes', 'empresa', 'doc_tipo',
+  'emitido_em', 'created_at', 'updated_at'
 ];
 export const CAMPOS_PERFIL = [
   'nome_comercial', 'cpf_cnpj', 'telefone', 'email', 'endereco', 'logo', 'tensao', 'concessionaria',
@@ -59,12 +67,13 @@ export const definirUsuario = (u) => { usuario = u; };
 
 // ---------- Orçamentos ----------
 const todos = () => ler(K.orcamentos, []);
-export const listarOrcamentos = () =>
-  todos().filter((o) => !o._del).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+const porEscopo = (escopo) => (o) => !escopo || (escopo === 'empresa' ? !!o.empresa_id : !o.empresa_id);
+export const listarOrcamentos = (escopo) =>
+  todos().filter((o) => !o._del && porEscopo(escopo)(o)).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
 export const obterOrcamento = (id) => todos().find((o) => o.id === id && !o._del) || null;
 export const proximoNumero = () => todos().reduce((m, o) => Math.max(m, Number(o.numero) || 0), 0) + 1;
 export const contarPendentes = () =>
-  todos().filter((o) => o._sync === 'pendente' || o._del).length + (obterPerfilBruto()._sync === 'pendente' ? 1 : 0);
+  todos().filter((o) => o._sync === 'pendente' || o._del).length + todasNotas().filter((o) => o._sync === 'pendente' || o._del).length + (obterPerfilBruto()._sync === 'pendente' ? 1 : 0);
 
 export function salvarOrcamento(orc) {
   const lista = todos();
@@ -85,6 +94,34 @@ export function excluirOrcamento(id) {
     lista = lista.map((o) => (o.id === id ? { ...o, _del: true, _sync: 'pendente' } : o));
   }
   gravar(K.orcamentos, lista);
+}
+
+// ---------- Notas de serviço ----------
+const todasNotas = () => ler(K.notas, []);
+export const listarNotas = (escopo) =>
+  todasNotas().filter((o) => !o._del && porEscopo(escopo)(o)).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+export const obterNota = (id) => todasNotas().find((o) => o.id === id && !o._del) || null;
+export const proximoNumeroNota = () => todasNotas().reduce((m, o) => Math.max(m, Number(o.numero) || 0), 0) + 1;
+export function salvarNota(nota) {
+  const lista = todasNotas();
+  const registro = { ...escolher(nota, CAMPOS_NOTA), updated_at: agora(), _sync: 'pendente' };
+  if (!registro.created_at) registro.created_at = registro.updated_at;
+  if (!registro.emitido_em) registro.emitido_em = hojeISO();
+  const i = lista.findIndex((o) => o.id === registro.id);
+  if (i >= 0) lista[i] = registro; else lista.push(registro);
+  gravar(K.notas, lista);
+  return registro;
+}
+export function excluirNota(id) {
+  let lista = todasNotas();
+  lista = usuario ? lista.map((o) => (o.id === id ? { ...o, _del: true, _sync: 'pendente' } : o)) : lista.filter((o) => o.id !== id);
+  gravar(K.notas, lista);
+}
+
+// ---------- Empresa compartilhada (cache local; a verdade fica no Supabase) ----------
+export const obterEmpresa = () => ler(K.empresa, null);
+export function definirEmpresa(e) {
+  if (e) gravar(K.empresa, e); else localStorage.removeItem(K.empresa);
 }
 
 // ---------- Perfil da empresa ----------
@@ -111,6 +148,8 @@ export function salvarPerfil(perfil) {
 export function limparTudo() {
   localStorage.removeItem(K.orcamentos);
   localStorage.removeItem(K.perfil);
+  localStorage.removeItem(K.notas);
+  localStorage.removeItem(K.empresa);
 }
 
 // ---------- Sincronização com o Supabase ----------
@@ -130,38 +169,51 @@ export async function sincronizar(sb, user) {
       if (data) gravar(K.perfil, { ...escolher(data, CAMPOS_PERFIL), _sync: 'ok' });
     }
 
-    // 2) Exclusões pendentes
-    let lista = todos();
-    for (const o of lista.filter((x) => x._del)) {
-      const { error } = await sb.from('orcamentos').delete().eq('id', o.id);
-      if (error) throw error;
-    }
-    lista = lista.filter((o) => !o._del);
+    // 2) Empresa compartilhada (se o usuário participa de alguma)
+    const empresa = await buscarMinhaEmpresa(sb, user);
+    definirEmpresa(empresa);
 
-    // 3) Envia os orçamentos pendentes (em lote)
-    const pendentes = lista.filter((o) => o._sync === 'pendente');
-    if (pendentes.length) {
-      const linhas = pendentes.map((o) => ({ ...escolher(o, CAMPOS_ORC), user_id: user.id }));
-      const { error } = await sb.from('orcamentos').upsert(linhas);
-      if (error) throw error;
-      lista = lista.map((o) => (o._sync === 'pendente' ? { ...o, _sync: 'ok' } : o));
-    }
-
-    // 4) Baixa o que mudou em outros aparelhos
-    const { data: remotos, error } = await sb.from('orcamentos').select('*');
-    if (error) throw error;
-    const idsRemotos = new Set(remotos.map((r) => r.id));
-    lista = lista.filter((o) => o._sync !== 'ok' || idsRemotos.has(o.id)); // apagado em outro aparelho
-    for (const r of remotos) {
-      const i = lista.findIndex((o) => o.id === r.id);
-      const novo = { ...escolher(r, CAMPOS_ORC), _sync: 'ok' };
-      if (i < 0) lista.push(novo);
-      else if (lista[i]._sync === 'ok' && Date.parse(r.updated_at) > Date.parse(lista[i].updated_at)) lista[i] = novo;
-    }
-    gravar(K.orcamentos, lista);
+    // 3) Orçamentos e notas: exclusões, envio dos pendentes e download do que mudou
+    await sincTabela(sb, user, 'orcamentos', K.orcamentos, CAMPOS_ORC, empresa);
+    await sincTabela(sb, user, 'notas', K.notas, CAMPOS_NOTA, empresa);
     return { ok: true };
   } catch (e) {
     console.error('Falha na sincronização', e);
     return { ok: false, motivo: 'erro', erro: e };
   }
+}
+
+async function sincTabela(sb, user, tabela, chave, campos, empresa) {
+  let lista = ler(chave, []);
+  for (const o of lista.filter((x) => x._del)) {
+    const { error } = await sb.from(tabela).delete().eq('id', o.id);
+    if (error) throw error;
+  }
+  lista = lista.filter((o) => !o._del);
+  // Quem saiu da empresa: o que estava pendente volta a ser pessoal
+  const idEmp = empresa ? empresa.id : null;
+  lista = lista.map((o) => (o._sync === 'pendente' && o.empresa_id && o.empresa_id !== idEmp ? { ...o, empresa_id: null } : o));
+
+  const pendentes = lista.filter((o) => o._sync === 'pendente');
+  if (pendentes.length) {
+    const linhas = pendentes.map((o) => ({ ...escolher(o, campos), user_id: user.id }));
+    const { error } = await sb.from(tabela).upsert(linhas);
+    if (error) throw error;
+    lista = lista.map((o) => (o._sync === 'pendente' ? { ...o, _sync: 'ok' } : o));
+  }
+
+  const { data: remotos, error } = await sb.from(tabela).select('*');
+  if (error) throw error;
+  const idsRemotos = new Set(remotos.map((r) => r.id));
+  lista = lista.filter((o) => o._sync !== 'ok' || idsRemotos.has(o.id)); // apagado em outro aparelho
+  for (const r of remotos) {
+    const i = lista.findIndex((o) => o.id === r.id);
+    const novo = { ...escolher(r, campos), _sync: 'ok' };
+    if (i < 0) lista.push(novo);
+    else if (lista[i]._sync === 'ok') {
+      if (Date.parse(r.updated_at) > Date.parse(lista[i].updated_at)) lista[i] = novo;
+      else if ((lista[i].empresa_id || null) !== (r.empresa_id || null)) lista[i] = { ...lista[i], empresa_id: r.empresa_id || null }; // empresa excluída
+    }
+  }
+  gravar(chave, lista);
 }

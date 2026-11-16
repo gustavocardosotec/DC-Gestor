@@ -1,8 +1,9 @@
 // Service Worker do DC Gestor - cache do app para funcionar sem internet
-const VERSAO = 'dc-gestor-v2.0.0';
+const VERSAO = 'dc-gestor-v3.0.0';
 const CASCA = [
   './', './index.html', './manifest.json',
-  './js/app.js', './js/auth.js', './js/pdf.js', './js/storage.js', './js/supabase.js', './js/utils.js'
+  './js/app.js', './js/auth.js', './js/equipe.js', './js/pdf.js',
+  './js/storage.js', './js/supabase.js', './js/utils.js'
 ];
 
 // Imagens: cada uma entra separada, para um arquivo faltando não travar a instalação
