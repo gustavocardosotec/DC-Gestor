@@ -21,16 +21,6 @@ Aplicativo web mobile-first para **gestão de orçamentos elétricos residenciai
 | PDF e QR | html2pdf.js e qrcodejs |
 | Hospedagem | Vercel |
 
-## Estrutura
-```
-index.html · manifest.json · sw.js · vercel.json
-js/        app, utils, storage, auth, supabase, pdf
-assets/    img (logo, ícones, whatsapp) e logos-bancos
-tools/     scripts de apoio
-sql/       scripts do banco
-Referencias/  modelo do orçamento
-```
-
 ## Rodando localmente
 1. Clone o repositório: `git clone https://github.com/gustavocardosotec/DC-Gestor.git`
 2. Na pasta do projeto, rode `python -m http.server 5500` (ou `npx serve`)
