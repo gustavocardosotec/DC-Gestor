@@ -340,7 +340,7 @@ function normalizarOrcamento(o) {
 }
 
 function novoOrcamento() {
-  const p = Store.obterPerfilAtivo(estado.escopo);
+  const p = Store.obterPerfil();
   return normalizarOrcamento({
     id: uuid(), numero: Store.proximoNumero(), status: 'rascunho',
     cliente_nome: '', cliente_telefone: '', cliente_email: '', cliente_documento: '', cliente_endereco: '',
@@ -703,7 +703,7 @@ function removerLoja(j) {
 }
 
 // =============================== Aba 3: Configurações ===============================
-const SUBTITULOS = { equipe: 'Empresa compartilhada', empresa: 'Empresa', pixzap: 'Pix e WhatsApp', conta: 'Conta e sincronização' };
+const SUBTITULOS = { equipe: 'Empresa compartilhada', empresa: 'Empresa (pessoal)', pixzap: 'Pix e WhatsApp (pessoal)', pixzap_emp: 'Pix e WhatsApp (empresa)', conta: 'Conta e sincronização' };
 
 /** Logo do banco (PNG da pasta assets). Se o arquivo não existir, mostra a sigla colorida. */
 function logoBancoHTML(idBanco, tam = 44) {
@@ -736,13 +736,14 @@ function renderConfig() {
   estado.perfil = Store.obterPerfil();
   if (estado.sub === 'equipe') return renderEquipe();
   if (estado.sub === 'empresa') return renderEmpresa();
-  if (estado.sub === 'pixzap') return renderPixZap();
+  if (estado.sub === 'pixzap') return renderPixZap('pessoal');
+  if (estado.sub === 'pixzap_emp') return renderPixZap('empresa');
   if (estado.sub === 'conta') return renderConta();
   const p = estado.perfil;
   conteudo.innerHTML = `<div class="space-y-3">
     ${itemMenu('empresa', '👤', 'Empresa (pessoal)', esc(p.nome_comercial) + (p.cpf_cnpj ? ' • ' + esc(p.cpf_cnpj) : ' • preencha o CNPJ/CPF'))}
     ${itemMenu('equipe', '👥', 'Empresa compartilhada', empresaAtiva() ? esc(empresaAtiva().nome) + ' • código ' + esc(empresaAtiva().codigo) : 'Criar ou entrar com código')}
-    ${itemMenu('pixzap', '💳', 'Pix e WhatsApp', `${p.pix_contas.length} Pix • ${p.whatsapps.length} WhatsApp`)}
+    ${itemMenu('pixzap', '💳', 'Pix e WhatsApp (pessoal)', `${p.pix_contas.length} Pix • ${p.whatsapps.length} WhatsApp`)}
     ${itemMenu('conta', '☁️', 'Conta e sincronização', estado.user ? esc(estado.user.email || 'Conectado') : 'Sem conta (só neste aparelho)')}
     <p class="text-center text-xs text-slate-400 pt-3">DC Gestor 3.1</p></div>`;
 }
@@ -859,11 +860,14 @@ function renderConta() {
 }
 
 // ---------- Pix e WhatsApp ----------
-function renderPixZap() {
-  const p = estado.perfil;
+function renderPixZap(escopoCfg = 'pessoal') {
+  estado.pixZapEscopo = escopoCfg;
+  const ehEmpresa = escopoCfg === 'empresa';
+  const p = ehEmpresa ? Store.obterPerfilEmpresa() : estado.perfil;
+  const voltarBtn = ehEmpresa ? '<button class="btn btn-sec mb-3" data-acao="sub" data-sub="equipe">← Voltar para Empresa</button>' : botaoVoltar;
   const linhasPix = p.pix_contas.map((c) => `
     <div class="cartao flex items-center gap-2 !p-3">
-      <button class="flex items-center gap-3 flex-1 min-w-0 text-left min-h-[48px]" data-acao="apresentar" data-tipo="pix" data-id="${c.id}">
+      <button class="flex items-center gap-3 flex-1 min-w-0 text-left min-h-[48px]" data-acao="apresentar-cfg" data-tipo="pix" data-id="${c.id}">
         ${logoBancoHTML(c.banco)}
         <span class="min-w-0"><b class="block truncate">${esc(c.apelido)}${c.id === p.pix_padrao_id ? ' <span class="text-[10px] font-bold text-brand bg-brand-50 px-1.5 py-0.5 rounded-full align-middle">padrão</span>' : ''}</b>
           <span class="block text-xs text-slate-500 truncate">${esc(obterBanco(c.banco).nome)} • ${esc(c.titular)} • ${esc(chaveBonita(c))}</span></span></button>
@@ -871,29 +875,38 @@ function renderPixZap() {
       <button class="btn btn-perigo" data-acao="del-pix" data-id="${c.id}" aria-label="Excluir Pix">🗑️</button></div>`).join('');
   const linhasZap = p.whatsapps.map((w) => `
     <div class="cartao flex items-center gap-2 !p-3">
-      <button class="flex items-center gap-3 flex-1 min-w-0 text-left min-h-[48px]" data-acao="apresentar" data-tipo="zap" data-id="${w.id}">
+      <button class="flex items-center gap-3 flex-1 min-w-0 text-left min-h-[48px]" data-acao="apresentar-cfg" data-tipo="zap" data-id="${w.id}">
         ${logoZapHTML()}
         <span class="min-w-0"><b class="block truncate">${esc(w.apelido)}</b>
           <span class="block text-xs text-slate-500 truncate">${esc(w.nome)} • ${esc(mascTel(apenasDigitos(w.numero).replace(/^55(?=\d{10,11}$)/, '')))}</span></span></button>
       <button class="btn btn-sec" data-acao="edit-zap" data-id="${w.id}" aria-label="Editar WhatsApp">✏️</button>
       <button class="btn btn-perigo" data-acao="del-zap" data-id="${w.id}" aria-label="Excluir WhatsApp">🗑️</button></div>`).join('');
-  conteudo.innerHTML = `${botaoVoltar}
-    <p class="text-sm text-slate-500 mb-4">Fica salvo na sua conta (aparece em qualquer aparelho) e também neste aparelho, para abrir sem internet. A apresentação pega as cores e o logo do banco.</p>
+  conteudo.innerHTML = `${voltarBtn}
+    <p class="text-sm text-slate-500 mb-4">${ehEmpresa ? 'Contas Pix e WhatsApp exclusivas da <b>empresa compartilhada</b>. Todos os membros da empresa veem e usam apenas estas contas.' : 'Contas Pix e WhatsApp exclusivas do seu <b>perfil pessoal</b> (privadas, não aparecem na empresa compartilhada).'}</p>
     <h2 class="titulo-sec">Pix (${p.pix_contas.length})</h2>
-    <div class="space-y-2 mb-2">${linhasPix}</div>
+    <div class="space-y-2 mb-2">${linhasPix || '<p class="text-sm text-slate-400">Nenhum Pix cadastrado.</p>'}</div>
     <button class="btn btn-sec w-full mb-5" data-acao="add-pix">＋ Adicionar Pix</button>
     <h2 class="titulo-sec">WhatsApp (${p.whatsapps.length})</h2>
-    <div class="space-y-2 mb-2">${linhasZap}</div>
+    <div class="space-y-2 mb-2">${linhasZap || '<p class="text-sm text-slate-400">Nenhum WhatsApp cadastrado.</p>'}</div>
     <button class="btn btn-sec w-full mb-5" data-acao="add-zap">＋ Adicionar WhatsApp</button>
-    <button class="btn btn-prim w-full" data-acao="apresentar" data-tipo="" data-id="">👁️ Ver apresentação</button>`;
+    <button class="btn btn-prim w-full" data-acao="apresentar-cfg" data-tipo="" data-id="">👁️ Ver apresentação</button>`;
 }
 
-/** Grava o perfil já com as contas atualizadas e sincroniza. */
-function gravarPerfil(p) {
-  Store.salvarPerfil(p);
-  estado.perfil = Store.obterPerfil();
+/** Grava o perfil já com as contas atualizadas e sincroniza (pessoal ou empresa compartilhada). */
+function gravarPerfilPorEscopo(p, escopoCfg = 'pessoal') {
+  if (escopoCfg === 'empresa') {
+    Store.salvarPerfilEmpresa(p);
+    estado.perfilEmpresa = Store.obterPerfilEmpresa();
+  } else {
+    Store.salvarPerfil(p);
+    estado.perfil = Store.obterPerfil();
+  }
   atualizarStatus();
   sincronizarAgora();
+}
+
+function gravarPerfil(p) {
+  gravarPerfilPorEscopo(p, 'pessoal');
 }
 
 // ----- Formulário: Novo Pix -----
@@ -908,7 +921,8 @@ function validarChave(tipo, chave) {
 const aplicarMascaraChave = (tipo, v) => (tipo === 'cpf' || tipo === 'cnpj' ? mascDoc(v) : tipo === 'celular' ? mascTel(v) : v);
 
 function abrirFormPix(id) {
-  const p = Store.obterPerfilAtivo(estado.escopo);
+  const escopoCfg = estado.pixZapEscopo || 'pessoal';
+  const p = Store.obterPerfilAtivo(escopoCfg);
   const conta = p.pix_contas.find((c) => c.id === id);
   estado.formPix = conta ? { ...conta } : { id: '', banco: 'nubank', apelido: '', titular: '', tipo: 'cpf', chave: '', cidade: p.pix_contas[0]?.cidade || '', mostrar_chave: true, copia_cola: '' };
   const f = estado.formPix;
@@ -947,11 +961,12 @@ function salvarFormPix() {
   if (!f.titular) return aviso('Informe o nome do titular.', true);
   if (!f.chave.trim() && !f.copia_cola) return aviso('Informe a chave Pix.', true);
   if (f.chave.trim() && !validarChave(f.tipo, f.chave)) return aviso('A chave não confere com o tipo escolhido.', true);
-  const p = Store.obterPerfilAtivo(estado.escopo);
+  const escopoCfg = estado.pixZapEscopo || 'pessoal';
+  const p = Store.obterPerfilAtivo(escopoCfg);
   if (f.id) p.pix_contas = p.pix_contas.map((c) => (c.id === f.id ? { ...f } : c));
   else { f.id = uuid(); p.pix_contas.push({ ...f }); }
   if (p.pix_padrao_id && !p.pix_contas.some((c) => c.id === p.pix_padrao_id)) p.pix_padrao_id = '';
-  gravarPerfil(p);
+  gravarPerfilPorEscopo(p, escopoCfg);
   fecharModal();
   renderConfig();
   aviso('Pix salvo.');
@@ -959,7 +974,8 @@ function salvarFormPix() {
 
 // ----- Formulário: Novo WhatsApp -----
 function abrirFormZap(id) {
-  const p = Store.obterPerfilAtivo(estado.escopo);
+  const escopoCfg = estado.pixZapEscopo || 'pessoal';
+  const p = Store.obterPerfilAtivo(escopoCfg);
   const w = p.whatsapps.find((x) => x.id === id);
   estado.formZap = w ? { ...w, numero: mascTel(apenasDigitos(w.numero).replace(/^55(?=\d{10,11}$)/, '')) } : { id: '', apelido: 'WhatsApp', nome: p.nome_comercial || '', numero: '', mensagem: '' };
   const f = estado.formZap;
@@ -982,10 +998,11 @@ function salvarFormZap() {
   f.nome = f.nome.trim();
   f.numero = d;
   if (!f.nome) return aviso('Informe seu nome ou o da empresa.', true);
-  const p = Store.obterPerfilAtivo(estado.escopo);
+  const escopoCfg = estado.pixZapEscopo || 'pessoal';
+  const p = Store.obterPerfilAtivo(escopoCfg);
   if (f.id) p.whatsapps = p.whatsapps.map((w) => (w.id === f.id ? { ...f } : w));
   else { f.id = uuid(); p.whatsapps.push({ ...f }); }
-  gravarPerfil(p);
+  gravarPerfilPorEscopo(p, escopoCfg);
   fecharModal();
   renderConfig();
   aviso('WhatsApp salvo.');
@@ -993,20 +1010,21 @@ function salvarFormZap() {
 
 function excluirConta(tipo, id) {
   if (!confirm(tipo === 'pix' ? 'Excluir este Pix?' : 'Excluir este WhatsApp?')) return;
-  const p = Store.obterPerfilAtivo(estado.escopo);
+  const escopoCfg = estado.pixZapEscopo || 'pessoal';
+  const p = Store.obterPerfilAtivo(escopoCfg);
   if (tipo === 'pix') {
     p.pix_contas = p.pix_contas.filter((c) => c.id !== id);
     if (p.pix_padrao_id === id) p.pix_padrao_id = '';
   } else {
     p.whatsapps = p.whatsapps.filter((w) => w.id !== id);
   }
-  gravarPerfil(p);
+  gravarPerfilPorEscopo(p, escopoCfg);
   renderConfig();
 }
 
 // ---------- Apresentação (cartão com QR para mostrar ao cliente) ----------
-function abrirApresentacao(tipo, id) {
-  const p = Store.obterPerfilAtivo(estado.escopo);
+function abrirApresentacao(tipo, id, escopoForcado = null) {
+  const p = Store.obterPerfilAtivo(escopoForcado || estado.escopo);
   const itens = [...p.pix_contas.map((c) => ({ tipo: 'pix', id: c.id })), ...p.whatsapps.map((w) => ({ tipo: 'zap', id: w.id }))];
   if (!itens.length) return aviso('Cadastre um Pix ou WhatsApp primeiro.', true);
   if (!id) ({ tipo, id } = itens[0]);
@@ -1189,7 +1207,7 @@ function verificarOnboarding() {
 function desenharAtalhos() {
   const alvo = $('#atalhos');
   if (!alvo) return;
-  const p = Store.obterPerfilAtivo(estado.escopo);
+  const p = Store.obterPerfil();
   const botoes = [
     ...p.pix_contas.map((c) => `<button class="atalho" data-acao="apresentar" data-tipo="pix" data-id="${c.id}">${logoBancoHTML(c.banco, 46)}<b>${esc(c.apelido)}</b><small>Mostrar Pix</small></button>`),
     ...p.whatsapps.map((w) => `<button class="atalho" data-acao="apresentar" data-tipo="zap" data-id="${w.id}">${logoZapHTML(46)}<b>${esc(w.apelido)}</b><small>Mostrar WhatsApp</small></button>`)
@@ -1203,7 +1221,7 @@ function desenharAtalhos() {
 }
 
 function abrirOnboarding() {
-  const p = Store.obterPerfilAtivo(estado.escopo);
+  const p = Store.obterPerfil();
   const precisaPix = p.pix_contas.length === 0;
   estado.onb = { nome: p.nome_comercial || '', cpf_cnpj: p.cpf_cnpj || '', telefone: p.telefone || '' };
   estado.formPix = { id: '', banco: 'nubank', apelido: 'Pix', titular: '', tipo: 'cpf', chave: '', cidade: '', mostrar_chave: true, copia_cola: '' };
@@ -1245,7 +1263,7 @@ function salvarOnboarding() {
   const tel = apenasDigitos(o.telefone);
   if (!nome) return aviso('Informe o nome da empresa ou o seu.', true);
   if (tel.length < 10 || tel.length > 11) return aviso('Informe o WhatsApp com DDD.', true);
-  const p = Store.obterPerfilAtivo(estado.escopo);
+  const p = Store.obterPerfil();
   const querPix = p.pix_contas.length === 0 && ((f.chave || '').trim() || (f.titular || '').trim());
   if (querPix) {
     if (!f.titular.trim()) return aviso('Informe o nome do titular do Pix.', true);
@@ -1333,7 +1351,7 @@ function linhaExtra(tipo, o) {
 
 // ---------- Nota de serviço ----------
 function novaNota() {
-  const p = Store.obterPerfilAtivo(estado.escopo);
+  const p = Store.obterPerfil();
   const emp = estado.escopo === 'empresa' ? empresaAtiva() : null;
   return {
     id: uuid(), numero: Store.proximoNumeroNota(), empresa_id: emp ? emp.id : null, origem_id: null, orcamento_id: null,
@@ -1486,6 +1504,7 @@ function renderEquipe() {
       <p class="text-sm text-slate-600 mb-3">Você é <b>${dono ? 'o dono' : 'membro'}</b>. Os dados abaixo são exclusivos desta empresa compartilhada e não alteram seu perfil pessoal.</p>
       <span class="rot">Código de convite</span>
       <div class="flex gap-2 items-center"><b class="text-2xl tracking-widest flex-1">${esc(emp.codigo)}</b><button class="btn btn-sec" data-acao="eq-copiar">Copiar</button></div></section>
+    ${itemMenu('pixzap_emp', '💳', 'Pix e WhatsApp da empresa', `${estado.perfilEmpresa.pix_contas.length} Pix • ${estado.perfilEmpresa.whatsapps.length} WhatsApp`)}
     ${htmlFormularioPerfil('eqperfil', estado.perfilEmpresa, {
       prevLogo: 'prev-logo-eq',
       arqLogo: 'arq-logo-eq',
@@ -1620,15 +1639,19 @@ function acoesNovas(d) {
     case 'eq-remover-logo':
       if (estado.perfilEmpresa) { estado.perfilEmpresa.logo = ''; desenharLogoEquipe(); }
       return true;
-    case 'eq-salvar-perfil':
+    case 'eq-salvar-perfil': {
       if (!estado.perfilEmpresa) return true;
       if (!(estado.perfilEmpresa.nome_comercial || '').trim()) { aviso('Informe o nome comercial da empresa.', true); return true; }
+      const atualEmp = Store.obterPerfilEmpresa();
+      estado.perfilEmpresa.pix_contas = atualEmp.pix_contas;
+      estado.perfilEmpresa.whatsapps = atualEmp.whatsapps;
       Store.salvarPerfilEmpresa(estado.perfilEmpresa);
       atualizarStatus();
       sincronizarAgora();
       aviso('Dados da empresa compartilhada salvos ✔');
       renderConfig();
       return true;
+    }
     default: return false;
   }
 }
@@ -1741,6 +1764,7 @@ async function aoClicar(ev) {
     case 'del-zap': return excluirConta('zap', d.id);
     case 'zp-salvar': return salvarFormZap();
     case 'apresentar': return abrirApresentacao(d.tipo, d.id);
+    case 'apresentar-cfg': return abrirApresentacao(d.tipo, d.id, estado.pixZapEscopo || 'pessoal');
     case 'ap-ir':
       Object.assign(estado.apres, { tipo: d.tipo, id: d.id, valor: 0, ocultar: false });
       desenharControlesApresentacao();

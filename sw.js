@@ -1,5 +1,5 @@
 // Service Worker do DC Gestor - cache do app para funcionar sem internet
-const VERSAO = 'dc-gestor-v3.1.1';
+const VERSAO = 'dc-gestor-v3.1.2';
 const CASCA = [
   './', './index.html', './manifest.json',
   './js/app.js', './js/auth.js', './js/equipe.js', './js/pdf.js',

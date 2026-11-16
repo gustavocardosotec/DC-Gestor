@@ -132,17 +132,11 @@ export function definirEmpresa(e) {
 export function obterPerfilEmpresa() {
   const emp = obterEmpresa();
   if (!emp) return obterPerfil();
-  const pessoal = obterPerfil();
   const bruto = (emp.perfil && typeof emp.perfil === 'object') ? emp.perfil : {};
   const p = JSON.parse(JSON.stringify({ ...PERFIL_PADRAO, ...escolher(bruto, CAMPOS_PERFIL) }));
   if (!p.nome_comercial) p.nome_comercial = emp.nome || '';
-  // Contas Pix e WhatsApps vêm do perfil pessoal se a empresa ainda não tiver próprios
-  if (!Array.isArray(p.pix_contas) || !p.pix_contas.length) {
-    p.pix_contas = pessoal.pix_contas;
-  }
-  if (!Array.isArray(p.whatsapps) || !p.whatsapps.length) {
-    p.whatsapps = pessoal.whatsapps;
-  }
+  if (!Array.isArray(p.pix_contas)) p.pix_contas = [];
+  if (!Array.isArray(p.whatsapps)) p.whatsapps = [];
   return p;
 }
 

@@ -2,17 +2,17 @@
 
 Aplicativo web mobile-first para **gestão de orçamentos elétricos residenciais**: do levantamento na obra ao orçamento e nota de serviço em PDF com Pix, direto no WhatsApp.
 
-**Versão:** 3.1.1
+**Versão:** 3.1.2
 
 ## Funcionalidades
 - **Levantamento em campo:** cadastro do cliente, da obra e dos materiais, com salvamento automático
 - **Cotação comparativa:** quantas lojas quiser, com escolha automática do menor preço por item e margem de lucro
 - **PDF do orçamento:** layout fiel ao modelo profissional (cliente, itens, totais, Pix e assinaturas)
 - **Nota de serviço em PDF:** recibo interno limpo e numerado em sequência (Nº 1, 2, 3...), com CNPJ/CPF, dados da empresa e forma de pagamento
-- **Orçamento 3.0 / 3.1.1:** tensão 127/220, dados da empresa editáveis por orçamento, acréscimos em lista com nome, seleção opcional de Pix padrão ou escolha livre por orçamento (tanto no perfil pessoal quanto na empresa compartilhada), opção de ocultar o Pix no PDF, novos status (Rascunho, Enviado, Aceito, Em andamento, Pago, Recusado, Concluído), forma de pagamento e botão "Mesma casa / cliente já atendido"; layout em duas colunas no PC
-- **Empresa compartilhada com perfil próprio:** código de convite para trabalhar em equipe, mantendo o perfil e o espaço **Pessoal** (backup privado) separados do perfil e do espaço **Da Empresa** (logo, CNPJ/CPF, endereço, parâmetros padrão, mensagem de WhatsApp, orçamentos, clientes e notas compartilhados)
+- **Orçamento 3.0 / 3.1.2:** tensão 127/220, dados da empresa editáveis por orçamento, acréscimos em lista com nome, seleção opcional de Pix padrão ou escolha livre por orçamento (tanto no perfil pessoal quanto na empresa compartilhada), opção de ocultar o Pix no PDF, novos status (Rascunho, Enviado, Aceito, Em andamento, Pago, Recusado, Concluído), forma de pagamento e botão "Mesma casa / cliente já atendido"; layout em duas colunas no PC
+- **Empresa compartilhada com perfil próprio:** código de convite para trabalhar em equipe, mantendo o perfil, Pix, WhatsApps e espaço **Pessoal** (backup privado) totalmente separados do perfil, Pix, WhatsApps e espaço **Da Empresa** (logo, CNPJ/CPF, endereço, parâmetros padrão, mensagem de WhatsApp, orçamentos, clientes e notas compartilhados)
 - **Clientes salvos:** acesso rápido para reaproveitar dados de clientes e obras anteriores
-- **Pix e WhatsApp:** várias contas, QR Code Pix com valor e logo do banco, cartão de apresentação para mostrar ao cliente
+- **Pix e WhatsApp:** várias contas gerenciadas separadamente no perfil pessoal e na empresa compartilhada, QR Code Pix com valor e logo do banco, cartão de apresentação para mostrar ao cliente
 - **Tela inicial com atalhos** de Pix e WhatsApp e assistente de configuração no primeiro uso
 - **Offline-first (PWA):** funciona sem internet e sincroniza quando o sinal volta
 - **Login:** Google ou e-mail e senha (ou uso local, sem conta)
