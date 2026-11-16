@@ -340,15 +340,16 @@ function normalizarOrcamento(o) {
 }
 
 function novoOrcamento() {
-  const p = Store.obterPerfil();
+  const ehEmpresa = estado.escopo === 'empresa' && !!empresaAtiva();
+  const p = Store.obterPerfilAtivo(ehEmpresa ? 'empresa' : 'pessoal');
   return normalizarOrcamento({
-    id: uuid(), numero: Store.proximoNumero(), status: 'rascunho',
+    id: uuid(), numero: Store.proximoNumero(ehEmpresa ? 'empresa' : 'pessoal'), status: 'rascunho',
     cliente_nome: '', cliente_telefone: '', cliente_email: '', cliente_documento: '', cliente_endereco: '',
     cliente_cep: '', cliente_bairro: '', cliente_cidade: '', cliente_estado: '', obra_nome: '', observacoes: '',
     itens: [itemVazio()], lojas_nomes: ['Loja 1', 'Loja 2', 'Loja 3'],
     pix_id: p.pix_padrao_id || '', margem_lucro: parseNum(p.margem_padrao), mao_de_obra: parseNum(p.mao_de_obra_padrao), desconto: 0, acrescimo: 0,
     tensao: p.tensao === '220' ? '220' : '127', empresa: {}, acrescimos: [], mostrar_pix: true, forma_pagamento: '',
-    empresa_id: estado.escopo === 'empresa' && empresaAtiva() ? empresaAtiva().id : null, origem_id: null,
+    empresa_id: ehEmpresa ? empresaAtiva().id : null, origem_id: null,
     valor_total: 0, validade_dias: parseNum(p.validade_dias) || 7, emitido_em: hojeISO()
   });
 }
@@ -1322,7 +1323,7 @@ function copiarParaEmpresa(tipo, id) {
   if (!emp || !o) return aviso('Entre em uma empresa para compartilhar (Configurações > Empresa compartilhada).', true);
   const existente = a.listar('empresa').find((x) => x.origem_id === o.id);
   if (existente && !confirm('Já existe uma cópia na empresa. Atualizar a cópia da empresa com o que está aqui?')) return;
-  a.salvar({ ...semMarcas(o), id: existente ? existente.id : uuid(), numero: existente ? existente.numero : a.proximo(), created_at: existente ? existente.created_at : undefined, empresa_id: emp.id, origem_id: o.id });
+  a.salvar({ ...semMarcas(o), id: existente ? existente.id : uuid(), numero: existente ? existente.numero : a.proximo('empresa'), created_at: existente ? existente.created_at : undefined, empresa_id: emp.id, origem_id: o.id });
   aviso(existente ? 'Cópia da empresa atualizada ✔' : 'Cópia enviada para a empresa ✔');
   desenharLista();
   atualizarStatus();
@@ -1351,10 +1352,11 @@ function linhaExtra(tipo, o) {
 
 // ---------- Nota de serviço ----------
 function novaNota() {
-  const p = Store.obterPerfil();
   const emp = estado.escopo === 'empresa' ? empresaAtiva() : null;
+  const escopoAtual = emp ? 'empresa' : 'pessoal';
+  const p = Store.obterPerfilAtivo(escopoAtual);
   return {
-    id: uuid(), numero: Store.proximoNumeroNota(), empresa_id: emp ? emp.id : null, origem_id: null, orcamento_id: null,
+    id: uuid(), numero: Store.proximoNumeroNota(escopoAtual), empresa_id: emp ? emp.id : null, origem_id: null, orcamento_id: null,
     ...Object.fromEntries(CAMPOS_CLIENTE.map((c) => [c, ''])),
     obra_nome: '', itens: [{ descricao: '', qtd: 1, valor: 0 }], desconto: 0, valor_total: 0, forma_pagamento: '', observacoes: '',
     empresa: {}, doc_tipo: apenasDigitos(p.cpf_cnpj).length === 11 ? 'CPF' : 'CNPJ', emitido_em: hojeISO()
@@ -1366,11 +1368,14 @@ function notaDeOrcamento(o) {
     .map((i) => ({ descricao: i.descricao, qtd: parseNum(i.qtd), valor: vendaUnitaria(i, o.margem_lucro) }));
   if (t.maoDeObra > 0) itens.push({ descricao: 'Mão de obra', qtd: 1, valor: t.maoDeObra });
   (o.acrescimos || []).filter((x) => parseNum(x.valor) > 0).forEach((x) => itens.push({ descricao: x.nome || 'Acréscimo', qtd: 1, valor: parseNum(x.valor) }));
+  const escopoNota = o.empresa_id ? 'empresa' : 'pessoal';
+  const p = Store.obterPerfilAtivo(escopoNota);
   return {
-    ...novaNota(), empresa_id: o.empresa_id || null, orcamento_id: o.id,
+    ...novaNota(), numero: Store.proximoNumeroNota(escopoNota), empresa_id: o.empresa_id || null, orcamento_id: o.id,
     ...Object.fromEntries(CAMPOS_CLIENTE.map((c) => [c, o[c] || ''])),
     obra_nome: o.obra_nome || '', itens: itens.length ? itens : [{ descricao: '', qtd: 1, valor: 0 }], desconto: t.desconto,
-    forma_pagamento: o.forma_pagamento || '', observacoes: o.observacoes || '', empresa: { ...(o.empresa || {}) }
+    forma_pagamento: o.forma_pagamento || '', observacoes: o.observacoes || '', empresa: { ...(o.empresa || {}) },
+    doc_tipo: apenasDigitos(p.cpf_cnpj).length === 11 ? 'CPF' : 'CNPJ'
   };
 }
 function totalNota() {
