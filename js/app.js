@@ -1,4 +1,4 @@
-// DC Gestor 3.0 - interface e eventos
+// DC Gestor 3.1 - interface e eventos
 import {
   $, $$, esc, uuid, brl, fmtData, fmtQtd, hojeISO, addDias, parseNum, numParaInput, apenasDigitos, semAcentos,
   MASCARAS, BANCOS, TIPOS_CHAVE, STATUS, statusDe, FORMAS_PGTO, itemVazio, calcularTotais, custoUnitario, vendaUnitaria, totalDoItem,
@@ -17,7 +17,7 @@ const NUMERICOS_ORC = new Set(['margem_lucro', 'mao_de_obra', 'desconto', 'acres
 const NUMERICOS_PERFIL = new Set(['margem_padrao', 'mao_de_obra_padrao', 'validade_dias']);
 const TITULOS = { obras: 'Obras & Orçamentos', levantamento: 'Novo Levantamento / Cotação', config: 'Configurações' };
 
-const estado = { escopo: 'pessoal', lista: 'orc', nota: null, eq: { nome: '', codigo: '' }, aba: 'obras', sub: null, formPix: null, formZap: null, apres: null, user: null, busca: '', filtro: 'todos', rascunho: null, novo: true, onb: null, timerAuto: null, timerSync: null, perfil: null, sincronizando: false, ultimoPayload: '' };
+const estado = { escopo: 'pessoal', lista: 'orc', nota: null, eq: { nome: '', codigo: '' }, aba: 'obras', sub: null, formPix: null, formZap: null, apres: null, user: null, busca: '', filtro: 'todos', rascunho: null, novo: true, onb: null, timerAuto: null, timerSync: null, perfil: null, perfilEmpresa: null, sincronizando: false, ultimoPayload: '' };
 const conteudo = $('#conteudo');
 
 // =============================== Avisos e modal ===============================
@@ -263,6 +263,8 @@ function desenharLista() {
   }).join('');
 }
 
+const perfilDoRegistro = (reg) => (reg && reg.empresa_id ? Store.obterPerfilEmpresa() : Store.obterPerfil());
+
 function mensagemWhats(o, perfil) {
   const t = calcularTotais(o);
   const emitido = o.emitido_em || hojeISO();
@@ -280,7 +282,7 @@ async function baixarDaLista(id) {
   if (!o) return;
   aviso('Gerando PDF…');
   try {
-    await PDF.baixarPDF(o, Store.obterPerfil());
+    await PDF.baixarPDF(o, perfilDoRegistro(o));
   } catch (e) {
     aviso(e.message || 'Não foi possível gerar o PDF.', true);
   }
@@ -289,7 +291,7 @@ async function baixarDaLista(id) {
 async function enviarOrcamento(id) {
   const o = Store.obterOrcamento(id);
   if (!o) return;
-  const perfil = Store.obterPerfil();
+  const perfil = perfilDoRegistro(o);
   const texto = mensagemWhats(o, perfil);
   aviso('Preparando o PDF…');
   try {
@@ -338,7 +340,7 @@ function normalizarOrcamento(o) {
 }
 
 function novoOrcamento() {
-  const p = Store.obterPerfil();
+  const p = Store.obterPerfilAtivo(estado.escopo);
   return normalizarOrcamento({
     id: uuid(), numero: Store.proximoNumero(), status: 'rascunho',
     cliente_nome: '', cliente_telefone: '', cliente_email: '', cliente_documento: '', cliente_endereco: '',
@@ -390,7 +392,7 @@ function renderLevantamento() {
     estado.novo = true;
   }
   const o = estado.rascunho;
-  const perfilAtual = Store.obterPerfil();
+  const perfilAtual = perfilDoRegistro(o);
   const pixSelecionado = o.pix_id || perfilAtual.pix_padrao_id;
   const pixOpcoes = perfilAtual.pix_contas.length
     ? perfilAtual.pix_contas.map((c) => `<option value="${c.id}" ${pixSelecionado === c.id ? 'selected' : ''}>${esc(c.apelido)} • ${esc(obterBanco(c.banco).nome)}</option>`).join('')
@@ -737,60 +739,71 @@ function renderConfig() {
   if (estado.sub === 'conta') return renderConta();
   const p = estado.perfil;
   conteudo.innerHTML = `<div class="space-y-3">
-    ${itemMenu('empresa', '🏢', 'Empresa', esc(p.nome_comercial) + (p.cpf_cnpj ? ' • ' + esc(p.cpf_cnpj) : ' • preencha o CNPJ/CPF'))}
+    ${itemMenu('empresa', '👤', 'Empresa (pessoal)', esc(p.nome_comercial) + (p.cpf_cnpj ? ' • ' + esc(p.cpf_cnpj) : ' • preencha o CNPJ/CPF'))}
     ${itemMenu('equipe', '👥', 'Empresa compartilhada', empresaAtiva() ? esc(empresaAtiva().nome) + ' • código ' + esc(empresaAtiva().codigo) : 'Criar ou entrar com código')}
     ${itemMenu('pixzap', '💳', 'Pix e WhatsApp', `${p.pix_contas.length} Pix • ${p.whatsapps.length} WhatsApp`)}
     ${itemMenu('conta', '☁️', 'Conta e sincronização', estado.user ? esc(estado.user.email || 'Conectado') : 'Sem conta (só neste aparelho)')}
-    <p class="text-center text-xs text-slate-400 pt-3">DC Gestor 3.0</p></div>`;
+    <p class="text-center text-xs text-slate-400 pt-3">DC Gestor 3.1</p></div>`;
 }
 
-// ---------- Empresa ----------
-function renderEmpresa() {
-  const p = estado.perfil;
+// ---------- Formulário reutilizável de perfil (pessoal e empresa compartilhada) ----------
+function htmlFormularioPerfil(attr, p, opts) {
   const pixOpcoes = p.pix_contas.length
     ? p.pix_contas.map((c) => `<option value="${c.id}" ${p.pix_padrao_id === c.id ? 'selected' : ''}>${esc(c.apelido)} • ${esc(obterBanco(c.banco).nome)}</option>`).join('')
     : '<option value="">Cadastre um Pix primeiro</option>';
   const tensoes = ['127', '220', '380'].map((v) => `<option value="${v}" ${String(p.tensao) === v ? 'selected' : ''}>${v} V</option>`).join('');
-  conteudo.innerHTML = `${botaoVoltar}
-    <div class="space-y-4">
+  return `
       <section class="cartao">
         <h2 class="titulo-sec">🖼️ Identidade visual</h2>
         <div class="flex items-center gap-3">
-          <div id="prev-logo" class="w-20 h-20 rounded-xl border border-dashed border-slate-300 bg-white grid place-items-center overflow-hidden shrink-0"></div>
+          <div id="${opts.prevLogo}" class="w-20 h-20 rounded-xl border border-dashed border-slate-300 bg-white grid place-items-center overflow-hidden shrink-0"></div>
           <div class="min-w-0">
-            <input id="arq-logo" type="file" accept="image/*" class="text-sm w-full">
+            <input id="${opts.arqLogo}" type="file" accept="image/*" class="text-sm w-full">
             <p class="text-xs text-slate-500 mt-1">Aparece no cabeçalho dos PDFs. Sem logo próprio, usa o logo padrão do DC Gestor.</p>
-            <button class="btn btn-sec mt-1 text-[13px]" data-acao="remover-logo">Usar logo padrão</button>
+            <button class="btn btn-sec mt-1 text-[13px]" data-acao="${opts.acaoRemoverLogo}">Usar logo padrão</button>
           </div>
         </div>
       </section>
       <section class="cartao">
         <h2 class="titulo-sec">👷 Profissional / empresa</h2>
         <div class="grid grid-cols-2 gap-3">
-          ${entrada('perfil', 'nome_comercial', 'Nome comercial', p.nome_comercial, { cls: 'col-span-2' })}
-          ${entrada('perfil', 'cpf_cnpj', 'CNPJ / CPF', p.cpf_cnpj, { mask: 'doc', modo: 'numeric' })}
-          ${entrada('perfil', 'telefone', 'Tel / WhatsApp', p.telefone, { mask: 'tel', tipo: 'tel', modo: 'tel', ph: '(14) 99999-9999' })}
-          ${entrada('perfil', 'email', 'E-mail comercial', p.email, { cls: 'col-span-2', tipo: 'email', modo: 'email' })}
-          ${entrada('perfil', 'endereco', 'Endereço', p.endereco, { cls: 'col-span-2' })}
+          ${entrada(attr, 'nome_comercial', 'Nome comercial', p.nome_comercial, { cls: 'col-span-2' })}
+          ${entrada(attr, 'cpf_cnpj', 'CNPJ / CPF', p.cpf_cnpj, { mask: 'doc', modo: 'numeric' })}
+          ${entrada(attr, 'telefone', 'Tel / WhatsApp', p.telefone, { mask: 'tel', tipo: 'tel', modo: 'tel', ph: '(14) 99999-9999' })}
+          ${entrada(attr, 'email', 'E-mail comercial', p.email, { cls: 'col-span-2', tipo: 'email', modo: 'email' })}
+          ${entrada(attr, 'endereco', 'Endereço', p.endereco, { cls: 'col-span-2' })}
         </div>
       </section>
       <section class="cartao">
         <h2 class="titulo-sec">📐 Parâmetros padrão</h2>
         <div class="grid grid-cols-2 gap-3">
-          <label class="block"><span class="rot">Tensão</span><select class="campo" data-perfil="tensao">${tensoes}</select></label>
-          ${entrada('perfil', 'concessionaria', 'Concessionária', p.concessionaria, { ph: 'Ex.: CPFL' })}
-          <label class="block col-span-2"><span class="rot">Pix padrão dos orçamentos</span><select class="campo" data-perfil="pix_padrao_id">${pixOpcoes}</select></label>
-          ${entrada('perfil', 'margem_padrao', 'Margem de lucro (%)', numParaInput(p.margem_padrao), { modo: 'decimal', ph: '0' })}
-          ${entrada('perfil', 'mao_de_obra_padrao', 'Mão de obra (R$)', numParaInput(p.mao_de_obra_padrao), { modo: 'decimal', ph: '0' })}
-          ${entrada('perfil', 'validade_dias', 'Validade do orçamento (dias)', numParaInput(p.validade_dias), { modo: 'numeric', ph: '7' })}
+          <label class="block"><span class="rot">Tensão</span><select class="campo" data-${attr}="tensao">${tensoes}</select></label>
+          ${entrada(attr, 'concessionaria', 'Concessionária', p.concessionaria, { ph: 'Ex.: CPFL' })}
+          <label class="block col-span-2"><span class="rot">Pix padrão dos orçamentos</span><select class="campo" data-${attr}="pix_padrao_id">${pixOpcoes}</select></label>
+          ${entrada(attr, 'margem_padrao', 'Margem de lucro (%)', numParaInput(p.margem_padrao), { modo: 'decimal', ph: '0' })}
+          ${entrada(attr, 'mao_de_obra_padrao', 'Mão de obra (R$)', numParaInput(p.mao_de_obra_padrao), { modo: 'decimal', ph: '0' })}
+          ${entrada(attr, 'validade_dias', 'Validade do orçamento (dias)', numParaInput(p.validade_dias), { modo: 'numeric', ph: '7' })}
         </div>
       </section>
       <section class="cartao">
         <h2 class="titulo-sec">💬 Mensagem ao enviar orçamento</h2>
-        <textarea class="campo" data-perfil="whatsapp_mensagem" rows="4">${esc(p.whatsapp_mensagem)}</textarea>
+        <textarea class="campo" data-${attr}="whatsapp_mensagem" rows="4">${esc(p.whatsapp_mensagem)}</textarea>
         <p class="text-xs text-slate-500 mt-1">Use {cliente}, {obra}, {numero}, {total} e {validade}.</p>
       </section>
-      <button class="btn btn-prim w-full" data-acao="salvar-empresa">💾 Salvar empresa</button>
+      <button class="btn btn-prim w-full" data-acao="${opts.acaoSalvar}">${opts.textoSalvar}</button>`;
+}
+
+// ---------- Empresa (pessoal) ----------
+function renderEmpresa() {
+  conteudo.innerHTML = `${botaoVoltar}
+    <div class="space-y-4">
+      ${htmlFormularioPerfil('perfil', estado.perfil, {
+        prevLogo: 'prev-logo',
+        arqLogo: 'arq-logo',
+        acaoRemoverLogo: 'remover-logo',
+        acaoSalvar: 'salvar-empresa',
+        textoSalvar: '💾 Salvar empresa pessoal'
+      })}
     </div>`;
   desenharLogo();
 }
@@ -801,10 +814,15 @@ function desenharLogo() {
   alvo.innerHTML = `<img src="${estado.perfil.logo || LOGO_EMPRESA}" alt="Logo" class="w-full h-full object-contain" onerror="this.replaceWith(document.createTextNode('Sem logo'))">`;
 }
 
-function aoEditarPerfil(el) {
-  const campo = el.dataset.perfil;
-  if (el.type === 'checkbox') estado.perfil[campo] = el.checked;
-  else estado.perfil[campo] = NUMERICOS_PERFIL.has(campo) ? parseNum(el.value) : el.value;
+function desenharLogoEquipe() {
+  const alvo = $('#prev-logo-eq');
+  if (!alvo || !estado.perfilEmpresa) return;
+  alvo.innerHTML = `<img src="${estado.perfilEmpresa.logo || LOGO_EMPRESA}" alt="Logo" class="w-full h-full object-contain" onerror="this.replaceWith(document.createTextNode('Sem logo'))">`;
+}
+
+function aoEditarPerfilAlvo(alvo, campo, el) {
+  if (el.type === 'checkbox') alvo[campo] = el.checked;
+  else alvo[campo] = NUMERICOS_PERFIL.has(campo) ? parseNum(el.value) : el.value;
 }
 
 function lerLogo(arquivo) {
@@ -888,7 +906,7 @@ function validarChave(tipo, chave) {
 const aplicarMascaraChave = (tipo, v) => (tipo === 'cpf' || tipo === 'cnpj' ? mascDoc(v) : tipo === 'celular' ? mascTel(v) : v);
 
 function abrirFormPix(id) {
-  const p = Store.obterPerfil();
+  const p = Store.obterPerfilAtivo(estado.escopo);
   const conta = p.pix_contas.find((c) => c.id === id);
   estado.formPix = conta ? { ...conta } : { id: '', banco: 'nubank', apelido: '', titular: '', tipo: 'cpf', chave: '', cidade: p.pix_contas[0]?.cidade || '', mostrar_chave: true, copia_cola: '' };
   const f = estado.formPix;
@@ -927,7 +945,7 @@ function salvarFormPix() {
   if (!f.titular) return aviso('Informe o nome do titular.', true);
   if (!f.chave.trim() && !f.copia_cola) return aviso('Informe a chave Pix.', true);
   if (f.chave.trim() && !validarChave(f.tipo, f.chave)) return aviso('A chave não confere com o tipo escolhido.', true);
-  const p = Store.obterPerfil();
+  const p = Store.obterPerfilAtivo(estado.escopo);
   if (f.id) p.pix_contas = p.pix_contas.map((c) => (c.id === f.id ? { ...f } : c));
   else { f.id = uuid(); p.pix_contas.push({ ...f }); }
   if (!p.pix_contas.some((c) => c.id === p.pix_padrao_id)) p.pix_padrao_id = p.pix_contas[0].id;
@@ -939,7 +957,7 @@ function salvarFormPix() {
 
 // ----- Formulário: Novo WhatsApp -----
 function abrirFormZap(id) {
-  const p = Store.obterPerfil();
+  const p = Store.obterPerfilAtivo(estado.escopo);
   const w = p.whatsapps.find((x) => x.id === id);
   estado.formZap = w ? { ...w, numero: mascTel(apenasDigitos(w.numero).replace(/^55(?=\d{10,11}$)/, '')) } : { id: '', apelido: 'WhatsApp', nome: p.nome_comercial || '', numero: '', mensagem: '' };
   const f = estado.formZap;
@@ -962,7 +980,7 @@ function salvarFormZap() {
   f.nome = f.nome.trim();
   f.numero = d;
   if (!f.nome) return aviso('Informe seu nome ou o da empresa.', true);
-  const p = Store.obterPerfil();
+  const p = Store.obterPerfilAtivo(estado.escopo);
   if (f.id) p.whatsapps = p.whatsapps.map((w) => (w.id === f.id ? { ...f } : w));
   else { f.id = uuid(); p.whatsapps.push({ ...f }); }
   gravarPerfil(p);
@@ -973,7 +991,7 @@ function salvarFormZap() {
 
 function excluirConta(tipo, id) {
   if (!confirm(tipo === 'pix' ? 'Excluir este Pix?' : 'Excluir este WhatsApp?')) return;
-  const p = Store.obterPerfil();
+  const p = Store.obterPerfilAtivo(estado.escopo);
   if (tipo === 'pix') {
     p.pix_contas = p.pix_contas.filter((c) => c.id !== id);
     if (p.pix_padrao_id === id) p.pix_padrao_id = p.pix_contas[0]?.id || '';
@@ -986,7 +1004,7 @@ function excluirConta(tipo, id) {
 
 // ---------- Apresentação (cartão com QR para mostrar ao cliente) ----------
 function abrirApresentacao(tipo, id) {
-  const p = Store.obterPerfil();
+  const p = Store.obterPerfilAtivo(estado.escopo);
   const itens = [...p.pix_contas.map((c) => ({ tipo: 'pix', id: c.id })), ...p.whatsapps.map((w) => ({ tipo: 'zap', id: w.id }))];
   if (!itens.length) return aviso('Cadastre um Pix ou WhatsApp primeiro.', true);
   if (!id) ({ tipo, id } = itens[0]);
@@ -1169,7 +1187,7 @@ function verificarOnboarding() {
 function desenharAtalhos() {
   const alvo = $('#atalhos');
   if (!alvo) return;
-  const p = Store.obterPerfil();
+  const p = Store.obterPerfilAtivo(estado.escopo);
   const botoes = [
     ...p.pix_contas.map((c) => `<button class="atalho" data-acao="apresentar" data-tipo="pix" data-id="${c.id}">${logoBancoHTML(c.banco, 46)}<b>${esc(c.apelido)}</b><small>Mostrar Pix</small></button>`),
     ...p.whatsapps.map((w) => `<button class="atalho" data-acao="apresentar" data-tipo="zap" data-id="${w.id}">${logoZapHTML(46)}<b>${esc(w.apelido)}</b><small>Mostrar WhatsApp</small></button>`)
@@ -1183,7 +1201,7 @@ function desenharAtalhos() {
 }
 
 function abrirOnboarding() {
-  const p = Store.obterPerfil();
+  const p = Store.obterPerfilAtivo(estado.escopo);
   const precisaPix = p.pix_contas.length === 0;
   estado.onb = { nome: p.nome_comercial || '', cpf_cnpj: p.cpf_cnpj || '', telefone: p.telefone || '' };
   estado.formPix = { id: '', banco: 'nubank', apelido: 'Pix', titular: '', tipo: 'cpf', chave: '', cidade: '', mostrar_chave: true, copia_cola: '' };
@@ -1225,7 +1243,7 @@ function salvarOnboarding() {
   const tel = apenasDigitos(o.telefone);
   if (!nome) return aviso('Informe o nome da empresa ou o seu.', true);
   if (tel.length < 10 || tel.length > 11) return aviso('Informe o WhatsApp com DDD.', true);
-  const p = Store.obterPerfil();
+  const p = Store.obterPerfilAtivo(estado.escopo);
   const querPix = p.pix_contas.length === 0 && ((f.chave || '').trim() || (f.titular || '').trim());
   if (querPix) {
     if (!f.titular.trim()) return aviso('Informe o nome do titular do Pix.', true);
@@ -1314,7 +1332,7 @@ function linhaExtra(tipo, o) {
 
 // ---------- Nota de serviço ----------
 function novaNota() {
-  const p = Store.obterPerfil();
+  const p = Store.obterPerfilAtivo(estado.escopo);
   const emp = estado.escopo === 'empresa' ? empresaAtiva() : null;
   return {
     id: uuid(), numero: Store.proximoNumeroNota(), empresa_id: emp ? emp.id : null, origem_id: null, orcamento_id: null,
@@ -1430,7 +1448,7 @@ async function enviarNota(id) {
   if (!n) return;
   const texto = `Olá, ${n.cliente_nome || 'cliente'}! Segue a nota de serviço nº ${n.numero} no valor de ${brl(PDF.calcularTotaisNota(n).total)}.`;
   aviso('Preparando o PDF…');
-  const compartilhou = await PDF.compartilharNotaPDF(n, Store.obterPerfil(), texto);
+  const compartilhou = await PDF.compartilharNotaPDF(n, perfilDoRegistro(n), texto);
   if (!compartilhou) {
     const tel = apenasDigitos(n.cliente_telefone);
     const numero = tel ? (tel.startsWith('55') && tel.length > 11 ? tel : '55' + tel) : '';
@@ -1461,13 +1479,22 @@ function renderEquipe() {
     return;
   }
   const dono = emp.papel === 'dono';
-  conteudo.innerHTML = `${botaoVoltar}<div class="space-y-3">
+  estado.perfilEmpresa = Store.obterPerfilEmpresa();
+  conteudo.innerHTML = `${botaoVoltar}<div class="space-y-4">
     <section class="cartao"><h2 class="titulo-sec">🏢 ${esc(emp.nome)}</h2>
-      <p class="text-sm text-slate-600 mb-3">Você é <b>${dono ? 'o dono' : 'membro'}</b>. Para compartilhar, use "Enviar p/ empresa" em um orçamento ou nota pessoal: a empresa recebe uma cópia, e mexer em uma não altera a outra (use "Atualizar meu original" se quiser).</p>
+      <p class="text-sm text-slate-600 mb-3">Você é <b>${dono ? 'o dono' : 'membro'}</b>. Os dados abaixo são exclusivos desta empresa compartilhada e não alteram seu perfil pessoal.</p>
       <span class="rot">Código de convite</span>
       <div class="flex gap-2 items-center"><b class="text-2xl tracking-widest flex-1">${esc(emp.codigo)}</b><button class="btn btn-sec" data-acao="eq-copiar">Copiar</button></div></section>
+    ${htmlFormularioPerfil('eqperfil', estado.perfilEmpresa, {
+      prevLogo: 'prev-logo-eq',
+      arqLogo: 'arq-logo-eq',
+      acaoRemoverLogo: 'eq-remover-logo',
+      acaoSalvar: 'eq-salvar-perfil',
+      textoSalvar: '💾 Salvar dados da empresa compartilhada'
+    })}
     <section class="cartao"><h2 class="titulo-sec">👥 Membros</h2><div id="lista-membros" class="text-sm text-slate-500">Carregando…</div></section>
     <button class="btn btn-perigo w-full" data-acao="${dono ? 'eq-excluir' : 'eq-sair'}">${dono ? 'Excluir empresa' : 'Sair da empresa'}</button></div>`;
+  desenharLogoEquipe();
   Equipe.listarMembros(emp.id).then((lista) => {
     const el = $('#lista-membros');
     if (!el) return;
@@ -1559,12 +1586,12 @@ function acoesNovas(d) {
         estado.nota = null;
         if (estado.aba === 'obras') desenharLista();
         aviso('Gerando PDF…');
-        PDF.baixarNotaPDF(n, Store.obterPerfil()).catch((e) => aviso(e.message || 'Não foi possível gerar o PDF.', true));
+        PDF.baixarNotaPDF(n, perfilDoRegistro(n)).catch((e) => aviso(e.message || 'Não foi possível gerar o PDF.', true));
       }
       return true;
     case 'nota-baixar': {
       const n = Store.obterNota(d.id);
-      if (n) { aviso('Gerando PDF…'); PDF.baixarNotaPDF(n, Store.obterPerfil()).catch((e) => aviso(e.message || 'Não foi possível gerar o PDF.', true)); }
+      if (n) { aviso('Gerando PDF…'); PDF.baixarNotaPDF(n, perfilDoRegistro(n)).catch((e) => aviso(e.message || 'Não foi possível gerar o PDF.', true)); }
       return true;
     }
     case 'nota-enviar': enviarNota(d.id).catch((e) => aviso(e.message || 'Não foi possível preparar o PDF.', true)); return true;
@@ -1588,6 +1615,18 @@ function acoesNovas(d) {
       return true;
     case 'eq-remover':
       if (confirm('Remover esta pessoa da empresa?')) mudarEmpresa(() => Equipe.removerMembro(empresaAtiva().id, d.uid), 'Membro removido.');
+      return true;
+    case 'eq-remover-logo':
+      if (estado.perfilEmpresa) { estado.perfilEmpresa.logo = ''; desenharLogoEquipe(); }
+      return true;
+    case 'eq-salvar-perfil':
+      if (!estado.perfilEmpresa) return true;
+      if (!(estado.perfilEmpresa.nome_comercial || '').trim()) { aviso('Informe o nome comercial da empresa.', true); return true; }
+      Store.salvarPerfilEmpresa(estado.perfilEmpresa);
+      atualizarStatus();
+      sincronizarAgora();
+      aviso('Dados da empresa compartilhada salvos ✔');
+      renderConfig();
       return true;
     default: return false;
   }
@@ -1666,7 +1705,7 @@ async function aoClicar(ev) {
       aviso('Gerando PDF…');
       alvo.disabled = true;
       try {
-        await PDF.baixarPDF(estado.rascunho, Store.obterPerfil());
+        await PDF.baixarPDF(estado.rascunho, perfilDoRegistro(estado.rascunho));
       } catch (e) {
         aviso(e.message || 'Não foi possível gerar o PDF.', true);
       }
@@ -1736,7 +1775,8 @@ function aoDigitar(ev) {
     const a = estado.rascunho.acrescimos[Number(el.dataset.acr)];
     if (a) { a[el.dataset.k] = el.dataset.k === 'valor' ? parseNum(el.value) : el.value; atualizarCalculos(); }
   }
-  else if (el.dataset.perfil !== undefined && estado.perfil) aoEditarPerfil(el);
+  else if (el.dataset.perfil !== undefined && estado.perfil) aoEditarPerfilAlvo(estado.perfil, el.dataset.perfil, el);
+  else if (el.dataset.eqperfil !== undefined && estado.perfilEmpresa) aoEditarPerfilAlvo(estado.perfilEmpresa, el.dataset.eqperfil, el);
   else if (el.dataset.fp !== undefined && estado.formPix) {
     const f = estado.formPix;
     const campo = el.dataset.fp;
@@ -1767,6 +1807,15 @@ async function aoEscolherLogo(ev) {
       estado.rascunho.empresa.logo = await lerLogo(ev.target.files[0]);
       renderLevantamento();
       agendarAutoSalvar();
+    } catch (e) {
+      aviso(e.message, true);
+    }
+    return;
+  }
+  if (ev.target.id === 'arq-logo-eq' && estado.perfilEmpresa) {
+    try {
+      estado.perfilEmpresa.logo = await lerLogo(ev.target.files[0]);
+      desenharLogoEquipe();
     } catch (e) {
       aviso(e.message, true);
     }

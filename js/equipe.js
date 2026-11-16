@@ -1,4 +1,4 @@
-// Empresa compartilhada: criar, entrar com código, membros (usa funções seguras do banco)
+// Empresa compartilhada: criar, entrar com código, membros e perfil próprio da empresa
 import { obterSupabase } from './supabase.js';
 
 const MENSAGENS = {
@@ -39,10 +39,20 @@ export async function listarMembros(eid) {
   return data || [];
 }
 
+/** Salva o perfil próprio da empresa compartilhada no Supabase. */
+export async function salvarPerfilEmpresaRemoto(sb, eid, perfil) {
+  const nome = (perfil.nome_comercial || '').trim();
+  const payload = { perfil, updated_at: perfil.updated_at || new Date().toISOString() };
+  if (nome) payload.nome = nome;
+  const { data, error } = await sb.from('empresas').update(payload).eq('id', eid).select('id, nome, codigo, dono_id, perfil, updated_at').single();
+  if (error) throw traduzir(error);
+  return data;
+}
+
 /** Empresa do usuário (ou null). Usada pela sincronização. */
 export async function buscarMinhaEmpresa(sb, user) {
   const { data, error } = await sb.from('empresa_membros')
-    .select('papel, empresas(id, nome, codigo, dono_id)').eq('user_id', user.id).maybeSingle();
+    .select('papel, empresas(id, nome, codigo, dono_id, perfil, updated_at)').eq('user_id', user.id).maybeSingle();
   if (error) throw error;
   return data && data.empresas ? { ...data.empresas, papel: data.papel } : null;
 }

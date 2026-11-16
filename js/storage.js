@@ -1,6 +1,6 @@
 // Motor offline-first: tudo grava no localStorage e sincroniza com o Supabase quando há sinal.
 import { hojeISO } from './utils.js';
-import { buscarMinhaEmpresa } from './equipe.js';
+import { buscarMinhaEmpresa, salvarPerfilEmpresaRemoto } from './equipe.js';
 
 const K = { orcamentos: 'dcg:orcamentos', perfil: 'dcg:perfil', notas: 'dcg:notas', empresa: 'dcg:empresa' };
 
@@ -72,8 +72,13 @@ export const listarOrcamentos = (escopo) =>
   todos().filter((o) => !o._del && porEscopo(escopo)(o)).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
 export const obterOrcamento = (id) => todos().find((o) => o.id === id && !o._del) || null;
 export const proximoNumero = () => todos().reduce((m, o) => Math.max(m, Number(o.numero) || 0), 0) + 1;
-export const contarPendentes = () =>
-  todos().filter((o) => o._sync === 'pendente' || o._del).length + todasNotas().filter((o) => o._sync === 'pendente' || o._del).length + (obterPerfilBruto()._sync === 'pendente' ? 1 : 0);
+export const contarPendentes = () => {
+  const emp = obterEmpresa();
+  return todos().filter((o) => o._sync === 'pendente' || o._del).length
+    + todasNotas().filter((o) => o._sync === 'pendente' || o._del).length
+    + (obterPerfilBruto()._sync === 'pendente' ? 1 : 0)
+    + (emp && emp._perfilSync === 'pendente' ? 1 : 0);
+};
 
 export function salvarOrcamento(orc) {
   const lista = todos();
@@ -118,13 +123,45 @@ export function excluirNota(id) {
   gravar(K.notas, lista);
 }
 
-// ---------- Empresa compartilhada (cache local; a verdade fica no Supabase) ----------
+// ---------- Empresa compartilhada e perfil próprio da empresa ----------
 export const obterEmpresa = () => ler(K.empresa, null);
 export function definirEmpresa(e) {
   if (e) gravar(K.empresa, e); else localStorage.removeItem(K.empresa);
 }
 
-// ---------- Perfil da empresa ----------
+export function obterPerfilEmpresa() {
+  const emp = obterEmpresa();
+  if (!emp) return obterPerfil();
+  const pessoal = obterPerfil();
+  const bruto = (emp.perfil && typeof emp.perfil === 'object') ? emp.perfil : {};
+  const p = JSON.parse(JSON.stringify({ ...PERFIL_PADRAO, ...escolher(bruto, CAMPOS_PERFIL) }));
+  if (!p.nome_comercial) p.nome_comercial = emp.nome || '';
+  // Contas Pix e WhatsApps vêm do perfil pessoal se a empresa ainda não tiver próprios
+  if (!Array.isArray(p.pix_contas) || !p.pix_contas.length) {
+    p.pix_contas = pessoal.pix_contas;
+    if (!p.pix_padrao_id) p.pix_padrao_id = pessoal.pix_padrao_id;
+  }
+  if (!Array.isArray(p.whatsapps) || !p.whatsapps.length) {
+    p.whatsapps = pessoal.whatsapps;
+  }
+  return p;
+}
+
+export function salvarPerfilEmpresa(perfil) {
+  const emp = obterEmpresa();
+  if (!emp) return;
+  const limpo = { ...escolher(perfil, CAMPOS_PERFIL), updated_at: agora() };
+  const novoNome = (limpo.nome_comercial || '').trim() || emp.nome;
+  gravar(K.empresa, {
+    ...emp,
+    nome: novoNome,
+    perfil: limpo,
+    updated_at: limpo.updated_at,
+    _perfilSync: 'pendente'
+  });
+}
+
+// ---------- Perfil da empresa (pessoal) ----------
 function obterPerfilBruto() {
   return ler(K.perfil, { ...PERFIL_PADRAO, _sync: 'padrao' });
 }
@@ -144,6 +181,9 @@ export function salvarPerfil(perfil) {
   gravar(K.perfil, { ...escolher(perfil, CAMPOS_PERFIL), updated_at: agora(), _sync: 'pendente' });
 }
 
+/** Retorna o perfil ativo conforme o escopo ('empresa' ou 'pessoal'). */
+export const obterPerfilAtivo = (escopo) => (escopo === 'empresa' && obterEmpresa() ? obterPerfilEmpresa() : obterPerfil());
+
 /** Limpa os dados do aparelho (usado ao sair da conta, depois de sincronizar). */
 export function limparTudo() {
   localStorage.removeItem(K.orcamentos);
@@ -157,7 +197,7 @@ export async function sincronizar(sb, user) {
   if (!sb || !user) return { ok: false, motivo: 'sem-conta' };
   if (!navigator.onLine) return { ok: false, motivo: 'offline' };
   try {
-    // 1) Perfil: envia se houver alteração local, senão baixa a versão da nuvem
+    // 1) Perfil pessoal: envia se houver alteração local, senão baixa a versão da nuvem
     let perfil = obterPerfilBruto();
     if (perfil._sync === 'pendente') {
       const { error } = await sb.from('perfis_empresa').upsert({ ...escolher(perfil, CAMPOS_PERFIL), user_id: user.id });
@@ -169,8 +209,15 @@ export async function sincronizar(sb, user) {
       if (data) gravar(K.perfil, { ...escolher(data, CAMPOS_PERFIL), _sync: 'ok' });
     }
 
-    // 2) Empresa compartilhada (se o usuário participa de alguma)
-    const empresa = await buscarMinhaEmpresa(sb, user);
+    // 2) Empresa compartilhada (e sincronização do perfil próprio da empresa)
+    const empLocal = obterEmpresa();
+    let empresa = await buscarMinhaEmpresa(sb, user);
+    if (empresa && empLocal && empLocal.id === empresa.id && empLocal._perfilSync === 'pendente') {
+      const atualizada = await salvarPerfilEmpresaRemoto(sb, empresa.id, empLocal.perfil || {});
+      empresa = { ...empresa, ...atualizada, _perfilSync: 'ok' };
+    } else if (empresa) {
+      empresa = { ...empresa, _perfilSync: 'ok' };
+    }
     definirEmpresa(empresa);
 
     // 3) Orçamentos e notas: exclusões, envio dos pendentes e download do que mudou
