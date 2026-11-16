@@ -24,7 +24,7 @@ Aplicativo web mobile-first para **gestão de orçamentos elétricos residenciai
 ## Créditos
 - **Idealização, desenvolvimento e design:** Gustavo Cardoso — DC Elétrica Residencial
 - **GitHub:** [@gustavocardosotec](https://github.com/gustavocardosotec)
-- Logos de bancos e do WhatsApp pertencem às respectivas marcas e são usados apenas para identificação.
+- Logos de bancos & do WhatsApp pertencem às respectivas marcas e são usados apenas para identificação.
 
 ---
 
