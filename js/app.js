@@ -1,4 +1,4 @@
-// DC Gestor 3.1 - interface e eventos
+// DC Gestor 5.0 - interface e eventos
 import {
   $, $$, esc, uuid, round2, brl, fmtData, fmtQtd, hojeISO, addDias, parseNum, numParaInput, apenasDigitos, semAcentos,
   MASCARAS, BANCOS, TIPOS_CHAVE, STATUS, statusDe, FORMAS_PGTO, itemVazio, calcularTotais, custoUnitario, vendaUnitaria, totalDoItem,
@@ -13,8 +13,8 @@ import { obterSupabase } from './supabase.js';
 const CHAVE_RASCUNHO = 'dcg:rascunho';
 const CHAVE_ULTIMO_USUARIO = 'dcg:ultimoUsuario';
 const CHAVE_ONB_PULADO = 'dcg:onbPulado';
-const NUMERICOS_ORC = new Set(['margem_lucro', 'mao_de_obra', 'desconto', 'acrescimo', 'validade_dias']);
-const NUMERICOS_PERFIL = new Set(['margem_padrao', 'mao_de_obra_padrao', 'validade_dias']);
+const NUMERICOS_ORC = new Set(['margem_lucro', 'mao_de_obra', 'desconto', 'acrescimo', 'validade_dias', 'entrada', 'parcelas', 'dias_previstos', 'horas_previstas', 'pessoas']);
+const NUMERICOS_PERFIL = new Set(['margem_padrao', 'mao_de_obra_padrao', 'validade_dias', 'followup_dias', 'taxa_visita', 'meta_dia', 'meta_hora']);
 const TITULOS = { obras: 'Obras & Orçamentos', levantamento: 'Novo Levantamento / Cotação', config: 'Configurações' };
 
 const estado = { escopo: 'pessoal', lista: 'orc', nota: null, eq: { nome: '', codigo: '' }, aba: 'obras', sub: null, formPix: null, formZap: null, apres: null, user: null, busca: '', filtro: 'todos', rascunho: null, novo: true, onb: null, timerAuto: null, timerSync: null, perfil: null, perfilEmpresa: null, sincronizando: false, ultimoPayload: '' };
@@ -177,6 +177,8 @@ async function sincronizarAgora(manual = false) {
 function mostrarLogin() {
   estado.user = null;
   Store.definirUsuario(null);
+  const pular = $('.pular-conteudo');
+  if (pular) pular.setAttribute('href', '#form-login');
   $('#app').classList.add('hidden');
   $('#tela-login').classList.remove('hidden');
   $('#login-msg').textContent = '';
@@ -185,6 +187,8 @@ function mostrarLogin() {
 function entrarNoApp(user) {
   if (user && estado.user && estado.user.id === user.id && !$('#app').classList.contains('hidden')) return;
   estado.user = user;
+  const pular = $('.pular-conteudo');
+  if (pular) pular.setAttribute('href', '#conteudo');
   Store.definirUsuario(user);
   if (user) {
     Auth.definirModoLocal(false);
@@ -362,7 +366,7 @@ function desenharLista() {
           <span class="inline-block text-[11px] font-bold px-2 py-0.5 rounded-full mt-1 ${st.cls}">${st.nome}</span>
         </div>
       </div>
-      <div class="grid grid-cols-4 gap-2 mt-3">
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
         <button class="btn btn-ghost px-1 text-[13px]" data-acao="editar" data-id="${o.id}">✏️ Editar</button>
         <button class="btn btn-ghost px-1 text-[13px]" data-acao="pdf" data-id="${o.id}">📄 PDF</button>
         <button class="btn btn-ghost px-1 text-[13px]" data-acao="enviar" data-id="${o.id}">💬 Enviar</button>
@@ -390,7 +394,7 @@ async function baixarDaLista(id) {
   if (!o) return;
   aviso('Gerando PDF…');
   try {
-    await PDF.baixarPDF(o, perfilDoRegistro(o));
+    await PDF.baixarPDFComplemento(o, perfilDoRegistro(o));
   } catch (e) {
     aviso(e.message || 'Não foi possível gerar o PDF.', true);
   }
@@ -583,6 +587,13 @@ function renderLevantamento() {
           ${num('mao_de_obra', 'Mão de obra (R$)')}
           ${num('desconto', 'Desconto (R$)')}
           ${num('validade_dias', 'Validade (dias)')}
+          ${entrada('campo', 'entrada', 'Entrada (R$)', numParaInput(o.entrada || 0), { modo: 'decimal' })}
+          ${entrada('campo', 'parcelas', 'Parcelas do saldo', Math.max(1, Math.floor(parseNum(o.parcelas) || 1)), { tipo: 'number', modo: 'numeric', ph: '1' })}
+          <div id="resumo-condicoes" class="col-span-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"></div>
+          ${entrada('campo', 'dias_previstos', 'Dias previstos', numParaInput(o.dias_previstos || 0), { modo: 'decimal' })}
+          ${entrada('campo', 'horas_previstas', 'Horas previstas', numParaInput(o.horas_previstas || 0), { modo: 'decimal' })}
+          ${entrada('campo', 'pessoas', 'Pessoas na equipe', Math.max(1, Math.floor(parseNum(o.pessoas) || 1)), { tipo: 'number', modo: 'numeric', ph: '1' })}
+          <div id="resumo-produtividade" class="col-span-2 interno hidden rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-sm"></div>
           <label class="block"><span class="rot">Status</span><select class="campo" data-campo="status">${statusOpcoes}</select></label>
           <label class="block"><span class="rot">Tensão da instalação</span><select class="campo" data-campo="tensao"><option value="127" ${o.tensao === '127' ? 'selected' : ''}>127 V</option><option value="220" ${o.tensao === '220' ? 'selected' : ''}>220 V</option></select></label>
           <label class="block"><span class="rot">Forma de pagamento</span><select class="campo" data-campo="forma_pagamento"><option value="">Não informar</option>${FORMAS_PGTO.map((f) => `<option ${o.forma_pagamento === f ? 'selected' : ''}>${f}</option>`).join('')}</select></label>
@@ -596,6 +607,7 @@ function renderLevantamento() {
         <h2 class="titulo-sec">➕ Acréscimos</h2>
         <div id="lista-acr" class="space-y-2">${htmlAcrescimos(o)}</div>
         <button class="btn btn-sec w-full mt-3" data-acao="add-acr">＋ Adicionar acréscimo</button>
+        <button class="btn btn-ghost w-full mt-2" data-acao="usar-taxa-visita">🚗 Inserir taxa de visita padrão (${brl(parseNum(perfilAtual.taxa_visita))})</button>
         <p class="text-xs text-slate-500 mt-2">Ex.: gasolina, pedágio. Cada um com seu nome; a soma entra no total.</p>
       </section>
 
@@ -671,6 +683,9 @@ function atualizarCalculos(auto = true) {
   const t = calcularTotais(o);
   o.valor_total = t.total;
   o.acrescimo = t.acrescimo;
+  o.entrada = Math.max(0, Math.min(t.total, parseNum(o.entrada)));
+  o.parcelas = Math.max(1, Math.floor(parseNum(o.parcelas) || 1));
+  o.pessoas = Math.max(1, Math.floor(parseNum(o.pessoas) || 1));
 
   o.itens.forEach((it, i) => {
     const res = $(`#res-${i}`);
@@ -701,6 +716,31 @@ function atualizarCalculos(auto = true) {
     </div>`;
   const rmat = $('#resumo-mat');
   if (rmat) rmat.innerHTML = htmlResumoMateriais(o);
+  const saldo = round2(t.total - o.entrada);
+  const valorParcela = round2(saldo / o.parcelas);
+  const valorUltima = o.parcelas > 1 ? round2(saldo - valorParcela * (o.parcelas - 1)) : valorParcela;
+  const resumoCondicoes = $('#resumo-condicoes');
+  if (resumoCondicoes) resumoCondicoes.innerHTML = '<b>Condições:</b> entrada de ' + brl(o.entrada) + ' • saldo de ' + brl(saldo) + ' em ' + o.parcelas + (o.parcelas === 1 ? ' parcela de ' : ' parcelas de ') + brl(valorParcela) + (o.parcelas > 1 ? ' (última de ' + brl(valorUltima) + ')' : '');
+  const resumoProdutividade = $('#resumo-produtividade');
+  if (resumoProdutividade) {
+    const lucro = round2(t.total - t.custo);
+    const dias = parseNum(o.dias_previstos);
+    const horas = parseNum(o.horas_previstas);
+    const perfilMeta = Store.obterPerfilAtivo(o.empresa_id ? 'empresa' : 'pessoal');
+    const partes = [];
+    if (dias > 0) {
+      const porDia = lucro / (dias * o.pessoas);
+      const meta = parseNum(perfilMeta.meta_dia);
+      partes.push('Por pessoa/dia: ' + brl(porDia) + (meta > 0 ? (porDia >= meta ? ' • meta atingida' : ' • abaixo da meta') : ' • defina uma meta no perfil'));
+    }
+    if (horas > 0) {
+      const porHora = lucro / (horas * o.pessoas);
+      const meta = parseNum(perfilMeta.meta_hora);
+      partes.push('Por pessoa/hora: ' + brl(porHora) + (meta > 0 ? (porHora >= meta ? ' • meta atingida' : ' • abaixo da meta') : ' • defina uma meta no perfil'));
+    }
+    resumoProdutividade.textContent = partes.length ? 'Lucro estimado: ' + brl(lucro) + ' • ' + partes.join(' • ') : '';
+    resumoProdutividade.classList.toggle('hidden', !partes.length);
+  }
   $('#bt-total').textContent = brl(t.total);
   $('#bt-lucro').textContent = brl(t.lucro + t.maoDeObra);
   guardarRascunhoTemp();
@@ -861,7 +901,7 @@ function renderConfig() {
     ${itemMenu('equipe', '👥', 'Empresa compartilhada', empresaAtiva() ? esc(empresaAtiva().nome) + ' • código ' + esc(empresaAtiva().codigo) : 'Criar ou entrar com código')}
     ${itemMenu('pixzap', '💳', 'Pix e WhatsApp (pessoal)', `${p.pix_contas.length} Pix • ${p.whatsapps.length} WhatsApp`)}
     ${itemMenu('conta', '☁️', 'Conta e sincronização', estado.user ? esc(estado.user.email || 'Conectado') : 'Sem conta (só neste aparelho)')}
-    <p class="text-center text-xs text-slate-400 pt-3">DC Gestor 3.1</p></div>`;
+    <p class="text-center text-xs text-slate-400 pt-3">DC Gestor 5.0</p></div>`;
 }
 
 // ---------- Formulário reutilizável de perfil (pessoal e empresa compartilhada) ----------
@@ -902,6 +942,10 @@ function htmlFormularioPerfil(attr, p, opts) {
           ${entrada(attr, 'margem_padrao', 'Margem de lucro (%)', numParaInput(p.margem_padrao), { modo: 'decimal', ph: '0' })}
           ${entrada(attr, 'mao_de_obra_padrao', 'Mão de obra (R$)', numParaInput(p.mao_de_obra_padrao), { modo: 'decimal', ph: '0' })}
           ${entrada(attr, 'validade_dias', 'Validade do orçamento (dias)', numParaInput(p.validade_dias), { modo: 'numeric', ph: '7' })}
+          ${entrada(attr, 'taxa_visita', 'Taxa padrão de visita (R$)', numParaInput(p.taxa_visita || 0), { modo: 'decimal', ph: '0' })}
+          ${entrada(attr, 'followup_dias', 'Lembrete de retorno após (dias)', numParaInput(p.followup_dias || 3), { modo: 'numeric', ph: '3' })}
+          ${entrada(attr, 'meta_dia', 'Meta de lucro por pessoa/dia (R$)', numParaInput(p.meta_dia || 0), { modo: 'decimal', ph: '0' })}
+          ${entrada(attr, 'meta_hora', 'Meta de lucro por pessoa/hora (R$)', numParaInput(p.meta_hora || 0), { modo: 'decimal', ph: '0' })}
         </div>
       </section>
       <section class="cartao">
@@ -1534,6 +1578,7 @@ function atualizarOriginal(tipo, id) {
 function linhaExtra(tipo, o) {
   const a = armazem(tipo);
   const bt = [];
+  if (tipo === 'orc') bt.push(`<button class="btn btn-sec px-1 text-[13px]" data-v4="home" data-id="${esc(o.id)}" aria-haspopup="dialog" aria-expanded="false">🧰 Ferramentas desta obra</button>`);
   const botaoOS = tipo === 'orc' && statusDe(o) === 'aceito'
     ? `<button class="btn btn-prim w-full mt-2" data-acao="iniciar-os" data-id="${o.id}">🔧 Iniciar OS</button>` : '';
   if (tipo === 'orc') bt.push(`<button class="btn btn-sec px-1 text-[13px]" data-acao="gerar-nota" data-id="${o.id}">🧾 Gerar nota</button>`);
@@ -1753,6 +1798,18 @@ function acoesNovas(d) {
     }
     case 'copiar-lista': copiarLista(estado.rascunho); return true;
     case 'copiar-lista-orc': copiarLista(Store.obterOrcamento(d.id)); return true;
+    case 'usar-taxa-visita': {
+      const o = estado.rascunho;
+      const perfil = Store.obterPerfilAtivo(estado.escopo);
+      const valor = Math.max(0, parseNum(perfil.taxa_visita));
+      if (!o) { aviso('Abra um orçamento antes de adicionar a taxa.', true); return true; }
+      if (valor <= 0) { aviso('Configure a taxa padrão em Configurações > Parâmetros padrão.', true); return true; }
+      o.acrescimos = Array.isArray(o.acrescimos) ? o.acrescimos : [];
+      const nome = 'Taxa de deslocamento / visita técnica';
+      if (o.acrescimos.some((item) => String(item.nome || '').toLowerCase() === nome.toLowerCase())) { aviso('A taxa de visita já está neste orçamento.', true); return true; }
+      o.acrescimos.push({ nome, valor });
+      renderLevantamento(); agendarAutoSalvar(); aviso('Taxa de visita adicionada ao orçamento.'); return true;
+    }
     case 'escopo': estado.escopo = d.v; renderObras(); return true;
     case 'modo-lista': estado.lista = d.v; renderObras(); return true;
     case 'clientes': abrirClientes(); return true;
@@ -1963,7 +2020,7 @@ async function aoClicar(ev) {
       aviso('Gerando PDF…');
       alvo.disabled = true;
       try {
-        await PDF.baixarPDF(estado.rascunho, perfilDoRegistro(estado.rascunho));
+        await PDF.baixarPDFComplemento(estado.rascunho, perfilDoRegistro(estado.rascunho));
       } catch (e) {
         aviso(e.message || 'Não foi possível gerar o PDF.', true);
       }
@@ -2120,7 +2177,7 @@ async function iniciar() {
 
 iniciar();
 // =============================== Complemento aditivo da 4.0 ===============================
-// Mantém o fluxo existente e adiciona as nove melhorias restantes em uma área própria.
+// Mantém os fluxos existentes e integra as ferramentas 5.0 ao orçamento e aos cartões de obra.
 const V4_RECIBO_SEQ = 'dcg:v4:recibo-seq';
 const V4_AGENDA_AVISOS = 'dcg:v4:agenda-avisos';
 const V4_FEATURES = [
@@ -2135,14 +2192,20 @@ const V4_FEATURES = [
   ['receipt', '🧾 Recibo de pagamento']
 ];
 
+let v5ModalReturnFocus = null;
+let v5ContextBudgetId = '';
 function v4OpenModal(html) {
   const previous = $('#v4-dialog');
-  if (previous) { if (previous.open) previous.close(); previous.remove(); }
+  if (previous) { previous.dataset.replaced = '1'; if (previous.open) previous.close(); previous.remove(); }
+  else if (document.activeElement instanceof HTMLElement) {
+    v5ModalReturnFocus = document.activeElement;
+    if (v5ModalReturnFocus.hasAttribute('aria-expanded')) v5ModalReturnFocus.setAttribute('aria-expanded', 'true');
+  }
   let style = $('#v4-dialog-style');
   if (!style) {
     style = document.createElement('style');
     style.id = 'v4-dialog-style';
-    style.textContent = '#v4-dialog{box-sizing:border-box;width:min(42rem,calc(100vw - 2rem));max-width:none;max-height:calc(100dvh - 2rem);padding:0;border:0;border-radius:16px;background:#fff;color:#0f172a;overflow:auto}#v4-dialog::backdrop{background:rgb(15 23 42 / .55);overflow:hidden;overscroll-behavior:contain}#v4-dialog{overscroll-behavior:contain}#v4-dialog>.modal{box-sizing:border-box;width:100%;max-width:none;max-height:none;margin:0;padding:1rem;border:0;border-radius:16px;background:#fff;overflow:visible}';
+    style.textContent = '#v4-dialog{box-sizing:border-box;width:min(42rem,calc(100vw - 2rem - env(safe-area-inset-left,0px) - env(safe-area-inset-right,0px)));max-width:none;max-height:calc(100vh - 2rem - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));max-height:calc(100dvh - 2rem - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));padding:0;border:0;border-radius:16px;background:#fff;color:#0f172a;overflow:auto}#v4-dialog::backdrop{background:rgb(15 23 42 / .55);overflow:hidden;overscroll-behavior:contain}#v4-dialog{overscroll-behavior:contain}#v4-dialog>.modal{box-sizing:border-box;width:100%;max-width:none;max-height:none;margin:0;padding:1rem;border:0;border-radius:16px;background:#fff;overflow:visible}#v5-tools-list{max-height:55vh;max-height:55dvh}';
     document.head.appendChild(style);
   }
   const dialog = document.createElement('dialog');
@@ -2153,7 +2216,19 @@ function v4OpenModal(html) {
   const heading = content.querySelector('.titulo-sec');
   if (heading) { heading.id = 'v4-dialog-title'; dialog.setAttribute('aria-labelledby','v4-dialog-title'); }
   dialog.appendChild(content);
-  dialog.addEventListener('close', () => dialog.remove(), {once:true});
+  dialog.addEventListener('close', () => {
+    const replaced = dialog.dataset.replaced === '1';
+    dialog.remove();
+    if (!replaced && v5ModalReturnFocus) {
+      const target = v5ModalReturnFocus;
+      v5ModalReturnFocus = null;
+      if (target.isConnected) {
+        if (target.hasAttribute('aria-expanded')) target.setAttribute('aria-expanded', 'false');
+        target.focus();
+      }
+      v5ContextBudgetId = '';
+    }
+  }, {once:true});
   document.body.appendChild(dialog);
   dialog.showModal();
   const focusTarget = dialog.querySelector('input,select,textarea,button');
@@ -2163,7 +2238,7 @@ function v4CloseModal() {
   const dialog = $('#v4-dialog');
   if (!dialog) return;
   if (dialog.open) dialog.close();
-  dialog.remove();
+  else dialog.remove();
 }
 
 function v4Money(value) { return brl(parseNum(value)); }
@@ -2217,14 +2292,21 @@ function v4SaveBudget(o) {
   sincronizarAgora();
   if (estado.aba === 'obras') desenharLista();
 }
-function v4Home() {
+function v4Home(contextId = '') {
+  v5ContextBudgetId = contextId || '';
   const pendentes = v4Records().filter((o) => statusDe(o) === 'enviado').length;
   const botoes = V4_FEATURES.map((x) => '<button class="btn btn-sec w-full justify-start" data-v4="feature" data-feature="' + x[0] + '">' + x[1] + (x[0] === 'followup' && pendentes ? ' <span class="ml-auto rounded-full bg-amber-100 px-2 text-amber-800">' + pendentes + '</span>' : '') + '</button>').join('');
-  v4OpenModal('<h1 class="titulo-sec">✨ Recursos extras da 4.0</h1><p class="text-sm text-slate-500 mb-3">As ferramentas usam os orçamentos e dados do espaço atual (' + (estado.escopo === 'empresa' ? 'empresa' : 'pessoal') + ').</p><div class="grid gap-2">' + botoes + '</div><button class="btn btn-ghost w-full mt-3" data-v4="close">Fechar</button>');
+  const contexto = contextId ? 'Você abriu pelo orçamento selecionado. As ferramentas compatíveis já vão usar essa obra.' : 'As ferramentas usam os dados do espaço atual (' + (estado.escopo === 'empresa' ? 'empresa' : 'pessoal') + ').';
+  v4OpenModal('<h1 class="titulo-sec">🧰 Ferramentas 5.0</h1><p class="text-sm text-slate-500 mb-3">' + contexto + '</p><div id="v5-tools-list" class="grid gap-2 overflow-y-auto pr-1">' + botoes + '</div><button class="btn btn-ghost w-full mt-3" data-v4="close">Fechar</button>');
 }
 function v4Feature(mode, id) {
-  const o = id ? Store.obterOrcamento(id) : null;
-  const currentId = o ? o.id : (estado.rascunho && estado.rascunho.id);
+  const selectedId = id || v5ContextBudgetId || (estado.rascunho && estado.rascunho.id) || '';
+  let o = selectedId ? Store.obterOrcamento(selectedId) : null;
+  if (!o && estado.rascunho && estado.rascunho.id === selectedId && temConteudo(estado.rascunho)) {
+    v4SaveBudget(estado.rascunho);
+    o = Store.obterOrcamento(selectedId) || estado.rascunho;
+  }
+  const currentId = o ? o.id : selectedId;
   if (mode === 'installments') {
     const budget = o || (currentId ? Store.obterOrcamento(currentId) : null);
     const amount = budget ? calcularTotais(budget).total : 0;
@@ -2243,7 +2325,7 @@ function v4Feature(mode, id) {
   } else if (mode === 'signature') {
     const budget = o || (currentId ? Store.obterOrcamento(currentId) : null);
     const signed = budget && budget.assinatura_cliente;
-    v4OpenModal('<h1 class="titulo-sec">✍️ Assinatura do cliente</h1>' + v4SelectBudget(currentId,'signature') + v4Input('v4-signer','Nome de quem assina',budget && budget.assinante_nome || '') + '<canvas id="v4-signature" width="720" height="220" aria-label="Área para assinatura" style="display:block;width:100%;height:150px;touch-action:none;background:#fff;border:1px solid #cbd5e1;border-radius:12px">Área de assinatura. Use um navegador compatível para assinar.</canvas><p class="text-xs text-slate-500 mt-2">A assinatura e o nome ficam salvos junto ao orçamento e sincronizam com os dados do app. Ela marca o orçamento como Aceito e pode ser incluída no PDF complementar.</p>' + (signed ? '<p class="text-xs text-green-700 mt-2">Assinado em ' + esc(fmtData(budget.assinado_em)) + ' por ' + esc(budget.assinante_nome || 'cliente') + '.</p>' : '') + '<div class="grid grid-cols-3 gap-2 mt-3"><button class="btn btn-ghost" data-v4="signature-clear">Limpar</button><button class="btn btn-sec" data-v4="signature-pdf">PDF</button><button class="btn btn-prim" data-v4="signature-save">Salvar aceite</button></div><button class="btn btn-ghost w-full mt-2" data-v4="close">Fechar</button>');
+    v4OpenModal('<h1 class="titulo-sec">✍️ Assinatura do cliente</h1>' + v4SelectBudget(currentId,'signature') + v4Input('v4-signer','Nome de quem assina',budget && budget.assinante_nome || '') + '<canvas id="v4-signature" width="720" height="220" aria-label="Área para assinatura" style="display:block;width:100%;height:150px;touch-action:none;background:#fff;border:1px solid #cbd5e1;border-radius:12px">Área de assinatura. Use um navegador compatível para assinar.</canvas><p class="text-xs text-slate-500 mt-2">A assinatura e o nome ficam salvos junto ao orçamento e sincronizam com os dados do app. Ela marca o orçamento como Aceito e pode ser incluída no PDF complementar.</p>' + (signed ? '<p class="text-xs text-green-700 mt-2">Assinado em ' + esc(fmtData(budget.assinado_em)) + ' por ' + esc(budget.assinante_nome || 'cliente') + '.</p>' : '') + '<div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3"><button class="btn btn-ghost" data-v4="signature-clear">Limpar</button><button class="btn btn-sec" data-v4="signature-pdf">PDF</button><button class="btn btn-prim" data-v4="signature-save">Salvar aceite</button></div><button class="btn btn-ghost w-full mt-2" data-v4="close">Fechar</button>');
     v4WireCanvas();
   } else if (mode === 'shopping') {
     const rows = v4Records().filter((r) => ['aceito','em_andamento'].includes(statusDe(r)));
@@ -2267,12 +2349,16 @@ function v4Feature(mode, id) {
   } else if (mode === 'profit') {
     const profile = v4CurrentProfile();
     const budget = o || (currentId ? Store.obterOrcamento(currentId) : null);
-    v4OpenModal('<h1 class="titulo-sec">📈 Termômetro de lucro</h1>' + v4SelectBudget(currentId,'profit') + '<div class="grid grid-cols-3 gap-2">' + v4Input('v4-days','Dias previstos',budget && budget.dias_previstos || 0,{inputmode:'decimal'}) + v4Input('v4-hours','Horas previstas',budget && budget.horas_previstas || 0,{inputmode:'decimal'}) + v4Input('v4-people','Pessoas',budget && budget.pessoas || 1,{type:'number',min:1,step:1}) + '</div><div class="grid grid-cols-2 gap-2 mt-3">' + v4Input('v4-target-day','Meta por dia (R$)',profile.meta_dia || 0,{inputmode:'decimal'}) + v4Input('v4-target-hour','Meta por hora (R$)',profile.meta_hora || 0,{inputmode:'decimal'}) + '</div><div id="v4-profit-result" class="cartao mt-3 text-sm">' + (budget ? v4ProfitSummary(budget, profile) : 'Selecione um orçamento salvo para calcular.') + '</div><button class="btn btn-prim w-full mt-3" data-v4="profit-save">Salvar e calcular</button><button class="btn btn-ghost w-full mt-2" data-v4="close">Fechar</button>');
+    v4OpenModal('<h1 class="titulo-sec">📈 Termômetro de lucro</h1>' + v4SelectBudget(currentId,'profit') + '<div class="grid grid-cols-1 sm:grid-cols-3 gap-2">' + v4Input('v4-days','Dias previstos',budget && budget.dias_previstos || 0,{inputmode:'decimal'}) + v4Input('v4-hours','Horas previstas',budget && budget.horas_previstas || 0,{inputmode:'decimal'}) + v4Input('v4-people','Pessoas',budget && budget.pessoas || 1,{type:'number',min:1,step:1}) + '</div><div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">' + v4Input('v4-target-day','Meta por dia (R$)',profile.meta_dia || 0,{inputmode:'decimal'}) + v4Input('v4-target-hour','Meta por hora (R$)',profile.meta_hora || 0,{inputmode:'decimal'}) + '</div><div id="v4-profit-result" class="cartao mt-3 text-sm">' + (budget ? v4ProfitSummary(budget, profile) : 'Selecione um orçamento salvo para calcular.') + '</div><button class="btn btn-prim w-full mt-3" data-v4="profit-save">Salvar e calcular</button><button class="btn btn-ghost w-full mt-2" data-v4="close">Fechar</button>');
   } else if (mode === 'receipt') {
     const budget = o || (currentId ? Store.obterOrcamento(currentId) : null);
     const total = budget ? calcularTotais(budget).total : 0;
+    if (budget && statusDe(budget) === 'pago' && Number(budget.recibo_numero) > 0) {
+      v4OpenModal('<h1 class="titulo-sec">🧾 Recibo já emitido</h1><p class="text-sm text-slate-600 mb-3">Este orçamento já está marcado como pago. O recibo nº ' + esc(budget.recibo_numero) + ' registra ' + v4Money(budget.valor_recebido) + ' em ' + esc(fmtData(budget.pago_em)) + '.</p><button class="btn btn-prim w-full" data-v4="receipt-download" data-id="' + esc(budget.id) + '">📄 Baixar segunda via</button><button class="btn btn-ghost w-full mt-2" data-v4="close">Fechar</button>');
+      return;
+    }
     const methods = FORMAS_PGTO.map((m) => '<option value="' + esc(m) + '" ' + (budget && budget.forma_recebimento === m ? 'selected' : '') + '>' + esc(m) + '</option>').join('');
-    v4OpenModal('<h1 class="titulo-sec">🧾 Recibo de pagamento</h1>' + v4SelectBudget(currentId,'receipt') + '<div class="grid grid-cols-2 gap-2">' + v4Input('v4-received','Valor recebido (R$)',budget && budget.valor_recebido || total,{inputmode:'decimal'}) + v4Input('v4-paid-date','Data do pagamento',budget && budget.pago_em || hojeISO(),{type:'date'}) + '</div><label for="v4-receipt-method" class="block mt-2"><span class="rot">Forma de recebimento</span><select id="v4-receipt-method" class="campo"><option value="">Selecione</option>' + methods + '</select></label><p class="text-sm text-slate-500 mt-3">Ao confirmar, o orçamento passa para Pago e recebe uma numeração própria de recibo.</p><button class="btn btn-prim w-full mt-3" data-v4="receipt-create">Marcar como pago e gerar recibo</button><button class="btn btn-ghost w-full mt-2" data-v4="close">Fechar</button>');
+    v4OpenModal('<h1 class="titulo-sec">🧾 Receber pagamento</h1>' + v4SelectBudget(currentId,'receipt') + '<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">' + v4Input('v4-received','Valor quitado (R$)',total,{inputmode:'decimal'}) + v4Input('v4-paid-date','Data do pagamento',budget && budget.pago_em || hojeISO(),{type:'date'}) + '</div><label for="v4-receipt-method" class="block mt-2"><span class="rot">Forma de recebimento</span><select id="v4-receipt-method" class="campo"><option value="">Selecione</option>' + methods + '</select></label><p class="text-sm text-slate-500 mt-3">Para marcar como Pago, o valor recebido precisa ser igual ao total. Assim o recibo confirma a quitação completa.</p><button class="btn btn-prim w-full mt-3" data-v4="receipt-create">Confirmar quitação e gerar recibo</button><button class="btn btn-ghost w-full mt-2" data-v4="close">Fechar</button>');
   }
 }
 
@@ -2372,16 +2458,18 @@ function v4CheckAgenda() {
 
 function v4EnsureButton() {
   const base = $('#btn-balcao');
-  if (!base || $('#btn-v4-recursos')) return;
+  if (!base || $('#btn-v5-tools')) return;
   const button = document.createElement('button');
-  button.id = 'btn-v4-recursos'; button.type = 'button'; button.className = 'text-sm font-bold min-h-[44px] px-2 rounded-full text-brand';
-  button.textContent = '＋ 4.0'; button.setAttribute('aria-label','Abrir recursos extras da versão 4.0'); button.dataset.v4 = 'home';
+  button.id = 'btn-v5-tools'; button.type = 'button'; button.className = 'text-lg font-bold min-h-[44px] min-w-[44px] px-2 rounded-full text-brand';
+  button.innerHTML = '<span aria-hidden="true">🧰</span><span class="sr-only">Ferramentas 5.0</span>';
+  button.setAttribute('aria-label','Ferramentas 5.0'); button.setAttribute('aria-haspopup','dialog'); button.setAttribute('aria-expanded','false');
+  button.title = 'Ferramentas 5.0'; button.dataset.v4 = 'home';
   base.insertAdjacentElement('afterend', button);
 }
 
 function v4Action(action, el) {
   const id = el.dataset.id || '';
-  if (action === 'home') return v4Home();
+  if (action === 'home') return v4Home(id);
   if (action === 'close') return v4CloseModal();
   if (action === 'feature') return v4Feature(el.dataset.feature);
   if (action === 'reload') return v4Feature(el.dataset.feature, ($('#v4-budget') || {}).value);
@@ -2425,11 +2513,19 @@ function v4Action(action, el) {
   if (action === 'profit-save') { const o=v4SelectedBudget(); if(!o) return aviso('Selecione um orçamento salvo.',true); o.dias_previstos=Math.max(0,parseNum($('#v4-days').value)); o.horas_previstas=Math.max(0,parseNum($('#v4-hours').value)); o.pessoas=Math.max(1,Math.floor(parseNum($('#v4-people').value)||1)); const p=v4CurrentProfile(); p.meta_dia=Math.max(0,parseNum($('#v4-target-day').value)); p.meta_hora=Math.max(0,parseNum($('#v4-target-hour').value)); v4SaveBudget(o); v4SaveProfile(p); $('#v4-profit-result').innerHTML=v4ProfitSummary(o,p); aviso('Tempo previsto e metas salvos.'); return; }
   if (action === 'receipt-create') {
     const o=v4SelectedBudget(); if(!o) return aviso('Selecione um orçamento salvo.',true);
+    const total=calcularTotais(o).total;
     const amount=Math.max(0,parseNum($('#v4-received').value)); if(amount<=0) return aviso('Informe o valor recebido.',true);
+    if (total <= 0) return aviso('O orçamento não tem um total para quitar.', true);
+    if (Math.abs(amount - total) > 0.01) return aviso('Para marcar como Pago, o valor precisa corresponder ao total de ' + brl(total) + '.', true, 5000);
     const used=v4Records().map((r)=>Number(r.recibo_numero)||0); const seq=Math.max(Number(localStorage.getItem(V4_RECIBO_SEQ)||0),0,...used)+1;
     o.valor_recebido=amount; o.pago_em=$('#v4-paid-date').value || hojeISO(); o.forma_recebimento=$('#v4-receipt-method').value || ''; o.recibo_numero=Number(o.recibo_numero)||seq; o.status='pago';
     v4SaveBudget(o); try { localStorage.setItem(V4_RECIBO_SEQ,String(Math.max(Number(localStorage.getItem(V4_RECIBO_SEQ)||0),o.recibo_numero))); } catch { /* a numeração também fica salva no orçamento */ }
     return PDF.baixarReciboPDF(o,perfilDoRegistro(o)).then(()=>aviso('Pagamento salvo e recibo gerado.')).catch((e)=>aviso(e.message||'Pagamento salvo, mas o PDF não foi gerado.',true));
+  }
+  if (action === 'receipt-download') {
+    const o = Store.obterOrcamento(id);
+    if (!o || !Number(o.recibo_numero)) return aviso('Recibo não encontrado.', true);
+    return PDF.baixarReciboPDF(o, perfilDoRegistro(o)).then(() => aviso('Segunda via do recibo gerada.')).catch((e) => aviso(e.message || 'Não foi possível gerar o recibo.', true));
   }
 }
 
@@ -2460,7 +2556,7 @@ document.addEventListener('click', (ev) => {
 const v4ButtonObserver = new MutationObserver(v4EnsureButton);
 if ($('#app')) v4ButtonObserver.observe($('#app'), {childList:true,subtree:true});
 v4EnsureButton();
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && document.documentElement.dataset.appVersion !== '5.0') {
   const registerV4Worker = () => navigator.serviceWorker.register('./sw-v4.0.7.js',{scope:'./'}).catch((e)=>console.warn('Service worker 4.0',e));
   registerV4Worker();
   setTimeout(registerV4Worker, 1000);

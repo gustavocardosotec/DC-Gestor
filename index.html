@@ -1,15 +1,15 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR" data-app-version="5.0">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#F26B1D">
-  <meta name="description" content="DC Gestor: gestão de campo, orçamentos e cotação de materiais.">
+  <meta name="description" content="DC Gestor 5.0: gestão de obras, orçamentos, materiais e pagamentos para eletricistas.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="DC Gestor">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>DC Gestor</title>
+  <title>DC Gestor 5.0 | Obras e orçamentos</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" href="assets/img/favicon.png">
   <link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
@@ -30,7 +30,9 @@
   <style>
     :root { --nav-h: calc(64px + env(safe-area-inset-bottom, 0px)); }
     html, body { height: 100%; }
-    body { background: #F6F8FB; color: #0F2742; font-family: Inter, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
+    html { scroll-padding-top: calc(64px + env(safe-area-inset-top, 0px)); scroll-padding-bottom: calc(var(--nav-h) + 12px); }
+    body { background: #F6F8FB; color: #0F2742; font-family: Inter, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; overflow-wrap: break-word; }
+    img, video { max-inline-size: 100%; block-size: auto; }
     .hidden { display: none !important; }
 
     /* Modo Balcão: esconde custo das peças, preços por loja, margem e lucro (só neste aparelho) */
@@ -69,7 +71,7 @@
     .atalho small { color: #64748b; font-size: 11px; }
     .atalho:active { transform: scale(.97); }
 
-    .nav { position: fixed; left: 0; right: 0; bottom: 0; height: var(--nav-h); padding-bottom: env(safe-area-inset-bottom, 0px); background: #fff; border-top: 1px solid #e5ebf2; display: grid; grid-template-columns: repeat(3, 1fr); z-index: 30; }
+    .nav { position: fixed; left: 0; right: 0; bottom: 0; height: var(--nav-h); padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); box-sizing: border-box; background: #fff; border-top: 1px solid #e5ebf2; display: grid; grid-template-columns: repeat(3, 1fr); z-index: 30; }
     .nav button { min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 11px; font-weight: 600; color: #64748b; line-height: 1.1; padding: 0 4px; text-align: center; }
     .nav button .ico { font-size: 20px; }
     .nav button.ativo { color: #F26B1D; }
@@ -87,6 +89,10 @@
 
     .painel-esq { background: linear-gradient(160deg, #0b1f36 0%, #123e6b 55%, #0f2742 100%); position: relative; overflow: hidden; }
     .painel-esq::before { content: ''; position: absolute; inset: 0; background-image: linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px); background-size: 28px 28px; }
+    .pular-conteudo { position: fixed; z-index: 100; top: 8px; left: 8px; padding: 10px 14px; border-radius: 10px; background: #0F2742; color: #fff; transform: translateY(-160%); }
+    .pular-conteudo:focus { transform: translateY(0); }
+    input[type="checkbox"], input[type="radio"] { min-width: 24px; min-height: 24px; accent-color: #F26B1D; }
+    @media (pointer: coarse) { label:has(input[type="checkbox"], input[type="radio"]) { min-height: 44px; } }
 
     @media (min-width: 1024px) {
       .grade-lev { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
@@ -98,6 +104,7 @@
   </style>
 </head>
 <body>
+  <a class="pular-conteudo" href="#conteudo">Pular para o conteúdo</a>
 
   <!-- ===================== LOGIN / CADASTRO ===================== -->
   <section id="tela-login" class="hidden min-h-full lg:grid lg:grid-cols-2">
@@ -105,7 +112,7 @@
       <div class="relative">
         <div class="flex items-center gap-3 mb-8">
           <img src="assets/img/logo.png" alt="DC Gestor" class="w-12 h-12 rounded-xl bg-white object-contain">
-          <span class="text-xl font-extrabold">DC Gestor <span class="text-orange-300">3.0</span></span>
+          <span class="text-xl font-extrabold">DC Gestor <span class="text-orange-300">5.0</span></span>
         </div>
         <h1 class="text-3xl font-extrabold leading-tight mb-3">Da visita na obra ao orçamento no WhatsApp</h1>
         <p class="text-slate-200 mb-8">Levante os materiais, compare quantas lojas quiser e entregue o PDF com Pix, tudo no celular.</p>
@@ -154,7 +161,7 @@
   <div id="app" class="hidden min-h-full">
     <header class="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-slate-200" style="padding-top: env(safe-area-inset-top, 0px)">
       <div class="max-w-2xl lg:max-w-5xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
-        <div class="flex items-center gap-2 min-w-0"><img src="assets/img/logo.png" alt="" class="w-8 h-8 rounded-lg object-contain"><h1 id="titulo-tela" class="text-base font-extrabold truncate">Obras &amp; Orçamentos</h1></div>
+        <div class="flex items-center gap-2 min-w-0"><img src="assets/img/logo.png" alt="" class="w-8 h-8 rounded-lg object-contain"><h1 id="titulo-tela" class="text-base font-extrabold min-w-0 whitespace-normal leading-tight">Obras &amp; Orçamentos</h1></div>
         <div class="flex items-center gap-1 shrink-0">
           <button id="btn-balcao" data-acao="balcao" class="text-lg min-h-[44px] min-w-[44px] rounded-full" aria-pressed="false" aria-label="Modo Balcão: ocultar custos e margem" title="Modo Balcão (oculta custos e margem)">👁️</button>
           <button id="chip-status" data-acao="sincronizar" class="text-xs font-semibold px-3 min-h-[44px] rounded-full text-slate-600 whitespace-nowrap" aria-live="polite">…</button>
@@ -162,7 +169,7 @@
       </div>
     </header>
 
-    <main id="conteudo" class="max-w-2xl lg:max-w-5xl mx-auto px-4 pt-4" style="padding-bottom: calc(var(--nav-h) + 24px)"></main>
+    <main id="conteudo" tabindex="-1" class="max-w-2xl lg:max-w-5xl mx-auto px-4 pt-4" style="padding-bottom: calc(var(--nav-h) + 24px)"></main>
 
     <nav class="nav" aria-label="Navegação principal">
       <button data-acao="aba" data-aba="obras"><span class="ico">🏗️</span><span>Obras &amp; Orçamentos</span></button>
@@ -172,7 +179,7 @@
   </div>
 
   <div id="modal" class="hidden"></div>
-  <div id="toasts" class="fixed left-0 right-0 z-[60] flex flex-col items-center gap-2 px-4 pointer-events-none" style="bottom: calc(var(--nav-h) + 80px)"></div>
+  <div id="toasts" role="status" aria-live="polite" aria-atomic="false" class="fixed left-0 right-0 z-[60] flex flex-col items-center gap-2 px-4 pointer-events-none" style="bottom: calc(var(--nav-h) + 80px)"></div>
 
   <script type="module" src="js/app.js"></script>
 </body>

@@ -351,21 +351,34 @@ export async function baixarPDFComplemento(orc, perfil) {
   const saldo = Math.max(0, round2(total - entrada));
   const valorParcela = parcelas ? round2(saldo / parcelas) : saldo;
   const valorUltimaParcela = parcelas > 1 ? round2(saldo - valorParcela * (parcelas - 1)) : valorParcela;
-  const condicoes = '<section style="margin-top:12px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font:12px Arial,Helvetica,sans-serif;page-break-inside:avoid;">' +
+  const condicoes = '<section style="margin-top:8px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font:12px Arial,Helvetica,sans-serif;page-break-inside:avoid;break-inside:avoid;">' +
     '<b style="font-size:13px;color:' + MARINHO + '">Condições de pagamento</b>' +
     '<div style="margin-top:6px">Entrada: <b>' + brl(entrada) + '</b></div>' +
     '<div>Saldo: <b>' + brl(saldo) + '</b> em <b>' + (parcelas > 1 ? (parcelas - 1) + 'x de ' + brl(valorParcela) + ' e 1x de ' + brl(valorUltimaParcela) : '1x de ' + brl(valorUltimaParcela)) + '</b>.</div>' +
     (orc.forma_pagamento ? '<div>Forma de pagamento: <b>' + esc(orc.forma_pagamento) + '</b></div>' : '') +
     '</section>';
-  let assinatura = '';
   if (orc.assinatura_cliente) {
-    assinatura = '<section style="margin-top:10px;padding:8px 12px;border:1px solid #cbd5e1;border-radius:8px;page-break-inside:avoid;font:11px Arial,Helvetica,sans-serif;">' +
-      '<b style="color:' + MARINHO + '">Aceite do cliente</b><div style="margin-top:4px">Assinante: ' + esc(orc.assinante_nome || 'Cliente') + (orc.assinado_em ? ' • ' + esc(fmtData(orc.assinado_em)) : '') + '</div>' +
-      '<img src="' + esc(orc.assinatura_cliente) + '" alt="Assinatura do cliente" style="display:block;max-width:250px;max-height:75px;object-fit:contain;margin-top:4px;border-bottom:1px solid #94a3b8">' +
-      '</section>';
+    const campoCliente = Array.from(root.querySelectorAll('div')).find((div) =>
+      div.childElementCount === 0 && div.textContent.trim() === 'Cliente'
+    );
+    if (campoCliente) {
+      const nome = esc(orc.assinante_nome || 'Cliente');
+      const data = orc.assinado_em ? ' • ' + esc(fmtData(orc.assinado_em)) : '';
+      campoCliente.parentElement.style.pageBreakInside = 'avoid';
+      campoCliente.parentElement.style.breakInside = 'avoid';
+      campoCliente.style.borderTop = '0';
+      campoCliente.style.paddingTop = '0';
+      campoCliente.innerHTML = '<div style="height:48px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:3px;box-sizing:border-box;page-break-inside:avoid;">' +
+        '<img src="' + esc(orc.assinatura_cliente) + '" alt="Assinatura do cliente" style="display:block;max-width:250px;max-height:44px;object-fit:contain;">' +
+        '</div><div style="border-top:1px solid #000;padding-top:3px;">Cliente</div>' +
+        '<div style="font-size:8px;padding-top:2px;">' + nome + data + '</div>';
+    }
   }
-  root.insertAdjacentHTML('beforeend', condicoes + assinatura);
-  const nome = nomeArquivo(orc).replace(/\.pdf$/i, '_condicoes.pdf');
+  const tabelas = root.querySelectorAll('table');
+  const tabelaTotais = tabelas[tabelas.length - 1];
+  if (tabelaTotais) tabelaTotais.insertAdjacentHTML('afterend', condicoes);
+  else root.insertAdjacentHTML('beforeend', condicoes);
+  const nome = nomeArquivo(orc);
   await html2pdf().set(opcoes(orc, nome)).from(el).save();
 }
 
