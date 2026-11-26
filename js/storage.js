@@ -2,7 +2,7 @@
 import { hojeISO } from './utils.js';
 import { buscarMinhaEmpresa, salvarPerfilEmpresaRemoto } from './equipe.js';
 
-const K = { orcamentos: 'dcg:orcamentos', perfil: 'dcg:perfil', notas: 'dcg:notas', empresa: 'dcg:empresa' };
+const K = { orcamentos: 'dcg:orcamentos', perfil: 'dcg:perfil', notas: 'dcg:notas', empresa: 'dcg:empresa', lojas: 'dcg:lojas' };
 
 export const CAMPOS_ORC = [
   'id', 'numero', 'status', 'cliente_nome', 'cliente_telefone', 'cliente_email', 'cliente_documento',
@@ -16,6 +16,10 @@ export const CAMPOS_NOTA = [
   'cliente_documento', 'cliente_endereco', 'cliente_cep', 'cliente_bairro', 'cliente_cidade', 'cliente_estado',
   'obra_nome', 'itens', 'desconto', 'valor_total', 'forma_pagamento', 'observacoes', 'empresa', 'doc_tipo',
   'emitido_em', 'created_at', 'updated_at'
+];
+export const CAMPOS_LOJA = [
+  'id', 'empresa_id', 'origem_id', 'nome', 'telefone', 'endereco', 'cep', 'bairro', 'cidade', 'estado',
+  'observacoes', 'created_at', 'updated_at'
 ];
 export const CAMPOS_PERFIL = [
   'nome_comercial', 'cpf_cnpj', 'telefone', 'email', 'endereco', 'logo', 'tensao', 'concessionaria',
@@ -77,6 +81,7 @@ export const contarPendentes = () => {
   const emp = obterEmpresa();
   return todos().filter((o) => o._sync === 'pendente' || o._del).length
     + todasNotas().filter((o) => o._sync === 'pendente' || o._del).length
+    + todasLojas().filter((o) => o._sync === 'pendente' || o._del).length
     + (obterPerfilBruto()._sync === 'pendente' ? 1 : 0)
     + (emp && emp._perfilSync === 'pendente' ? 1 : 0);
 };
@@ -123,6 +128,26 @@ export function excluirNota(id) {
   let lista = todasNotas();
   lista = usuario ? lista.map((o) => (o.id === id ? { ...o, _del: true, _sync: 'pendente' } : o)) : lista.filter((o) => o.id !== id);
   gravar(K.notas, lista);
+}
+
+// ---------- Lojas / Fornecedores ----------
+const todasLojas = () => ler(K.lojas, []);
+export const listarLojas = (escopo) =>
+  todasLojas().filter((o) => !o._del && porEscopo(escopo)(o)).sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+export const obterLoja = (id) => todasLojas().find((o) => o.id === id && !o._del) || null;
+export function salvarLoja(loja) {
+  const lista = todasLojas();
+  const registro = { ...escolher(loja, CAMPOS_LOJA), updated_at: agora(), _sync: 'pendente' };
+  if (!registro.created_at) registro.created_at = registro.updated_at;
+  const i = lista.findIndex((o) => o.id === registro.id);
+  if (i >= 0) lista[i] = registro; else lista.push(registro);
+  gravar(K.lojas, lista);
+  return registro;
+}
+export function excluirLoja(id) {
+  let lista = todasLojas();
+  lista = usuario ? lista.map((o) => (o.id === id ? { ...o, _del: true, _sync: 'pendente' } : o)) : lista.filter((o) => o.id !== id);
+  gravar(K.lojas, lista);
 }
 
 // ---------- Empresa compartilhada e perfil próprio da empresa ----------
@@ -185,6 +210,7 @@ export function limparTudo() {
   localStorage.removeItem(K.perfil);
   localStorage.removeItem(K.notas);
   localStorage.removeItem(K.empresa);
+  localStorage.removeItem(K.lojas);
 }
 
 // ---------- Sincronização com o Supabase ----------
@@ -218,6 +244,12 @@ export async function sincronizar(sb, user) {
     // 3) Orçamentos e notas: exclusões, envio dos pendentes e download do que mudou
     await sincTabela(sb, user, 'orcamentos', K.orcamentos, CAMPOS_ORC, empresa);
     await sincTabela(sb, user, 'notas', K.notas, CAMPOS_NOTA, empresa);
+    // Lojas: se a tabela ainda não existir no banco (sql/07 não rodado), não derruba o resto da sincronização
+    try {
+      await sincTabela(sb, user, 'lojas', K.lojas, CAMPOS_LOJA, empresa);
+    } catch (e) {
+      console.warn('Lojas não sincronizadas (o sql/07 já foi rodado no Supabase?)', e);
+    }
     return { ok: true };
   } catch (e) {
     console.error('Falha na sincronização', e);
@@ -259,3 +291,12 @@ async function sincTabela(sb, user, tabela, chave, campos, empresa) {
   }
   gravar(chave, lista);
 }
+// =============================== Campos das melhorias restantes da 4.0 ===============================
+// O SQL 07 já cria estas colunas e mantém o perfil da empresa em empresas.perfil (jsonb).
+CAMPOS_ORC.push(
+  'entrada', 'parcelas', 'enviado_em', 'ultimo_followup_em', 'assinatura_cliente', 'assinante_nome', 'assinado_em',
+  'agenda_em', 'agenda_aviso', 'dias_previstos', 'horas_previstas', 'pessoas', 'pago_em', 'valor_recebido',
+  'forma_recebimento', 'recibo_numero'
+);
+CAMPOS_PERFIL.push('followup_dias', 'taxa_visita', 'meta_dia', 'meta_hora');
+Object.assign(PERFIL_PADRAO, {followup_dias:3, taxa_visita:0, meta_dia:0, meta_hora:0});

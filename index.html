@@ -33,6 +33,12 @@
     body { background: #F6F8FB; color: #0F2742; font-family: Inter, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
     .hidden { display: none !important; }
 
+    /* Modo Balcão: esconde custo das peças, preços por loja, margem e lucro (só neste aparelho) */
+    body.balcao .interno { display: none !important; }
+    .so-balcao { display: none; }
+    body.balcao .so-balcao { display: inline; }
+    body.balcao #btn-balcao { background: #FFF3EA; box-shadow: 0 0 0 2px rgba(242, 107, 29, .35); }
+
     /* Campos: fonte 16px evita o zoom automático do iOS; altura mínima de 44px para o toque */
     .campo { width: 100%; min-height: 44px; border: 1px solid #dbe4ee; border-radius: 12px; padding: 0 12px; background: #fff; font-size: 16px; color: #0F2742; outline: none; }
     textarea.campo { padding: 10px 12px; min-height: 76px; resize: vertical; }
@@ -149,7 +155,10 @@
     <header class="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-slate-200" style="padding-top: env(safe-area-inset-top, 0px)">
       <div class="max-w-2xl lg:max-w-5xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
         <div class="flex items-center gap-2 min-w-0"><img src="assets/img/logo.png" alt="" class="w-8 h-8 rounded-lg object-contain"><h1 id="titulo-tela" class="text-base font-extrabold truncate">Obras &amp; Orçamentos</h1></div>
-        <button id="chip-status" data-acao="sincronizar" class="text-xs font-semibold px-3 min-h-[44px] rounded-full text-slate-600 whitespace-nowrap" aria-live="polite">…</button>
+        <div class="flex items-center gap-1 shrink-0">
+          <button id="btn-balcao" data-acao="balcao" class="text-lg min-h-[44px] min-w-[44px] rounded-full" aria-pressed="false" aria-label="Modo Balcão: ocultar custos e margem" title="Modo Balcão (oculta custos e margem)">👁️</button>
+          <button id="chip-status" data-acao="sincronizar" class="text-xs font-semibold px-3 min-h-[44px] rounded-full text-slate-600 whitespace-nowrap" aria-live="polite">…</button>
+        </div>
       </div>
     </header>
 

@@ -340,3 +340,76 @@ export async function compartilharNotaPDF(nota, perfil, texto) {
   const blob = await html2pdf().set(opcoes(nota, nomeArquivoNota(nota))).from(elementoNota(nota, perfil)).outputPdf('blob');
   return entregarBlob(blob, nomeArquivoNota(nota), `Nota de serviço nº ${nota.numero}`, texto);
 }
+// =============================== PDF complementar da versão 4.0 ===============================
+export async function baixarPDFComplemento(orc, perfil) {
+  exigirBiblioteca();
+  const el = await prepararElemento(orc, perfil);
+  const root = el.firstElementChild || el;
+  const total = calcularTotais(orc).total;
+  const entrada = Math.max(0, Math.min(total, parseNum(orc.entrada)));
+  const parcelas = Math.max(1, Math.floor(parseNum(orc.parcelas) || 1));
+  const saldo = Math.max(0, round2(total - entrada));
+  const valorParcela = parcelas ? round2(saldo / parcelas) : saldo;
+  const valorUltimaParcela = parcelas > 1 ? round2(saldo - valorParcela * (parcelas - 1)) : valorParcela;
+  const condicoes = '<section style="margin-top:12px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font:12px Arial,Helvetica,sans-serif;page-break-inside:avoid;">' +
+    '<b style="font-size:13px;color:' + MARINHO + '">Condições de pagamento</b>' +
+    '<div style="margin-top:6px">Entrada: <b>' + brl(entrada) + '</b></div>' +
+    '<div>Saldo: <b>' + brl(saldo) + '</b> em <b>' + (parcelas > 1 ? (parcelas - 1) + 'x de ' + brl(valorParcela) + ' e 1x de ' + brl(valorUltimaParcela) : '1x de ' + brl(valorUltimaParcela)) + '</b>.</div>' +
+    (orc.forma_pagamento ? '<div>Forma de pagamento: <b>' + esc(orc.forma_pagamento) + '</b></div>' : '') +
+    '</section>';
+  let assinatura = '';
+  if (orc.assinatura_cliente) {
+    assinatura = '<section style="margin-top:10px;padding:8px 12px;border:1px solid #cbd5e1;border-radius:8px;page-break-inside:avoid;font:11px Arial,Helvetica,sans-serif;">' +
+      '<b style="color:' + MARINHO + '">Aceite do cliente</b><div style="margin-top:4px">Assinante: ' + esc(orc.assinante_nome || 'Cliente') + (orc.assinado_em ? ' • ' + esc(fmtData(orc.assinado_em)) : '') + '</div>' +
+      '<img src="' + esc(orc.assinatura_cliente) + '" alt="Assinatura do cliente" style="display:block;max-width:250px;max-height:75px;object-fit:contain;margin-top:4px;border-bottom:1px solid #94a3b8">' +
+      '</section>';
+  }
+  root.insertAdjacentHTML('beforeend', condicoes + assinatura);
+  const nome = nomeArquivo(orc).replace(/\.pdf$/i, '_condicoes.pdf');
+  await html2pdf().set(opcoes(orc, nome)).from(el).save();
+}
+
+export async function baixarReciboPDF(orc, perfil) {
+  exigirBiblioteca();
+  const empresa = { ...(perfil || {}) };
+  Object.entries(orc.empresa || {}).forEach(([k, v]) => { if (String(v || '').trim()) empresa[k] = v; });
+  const numero = Number(orc.recibo_numero) || 1;
+  const valor = Math.max(0, parseNum(orc.valor_recebido));
+  const data = orc.pago_em || hojeISO();
+  const descricao = orc.obra_nome || 'serviços descritos no orçamento nº ' + (orc.numero || '—');
+  const origem = orc.numero ? 'Orçamento / OS nº ' + orc.numero : 'Serviço contratado';
+  const nomeArquivoRecibo = 'Recibo_' + numero + '_' + semAcentos(orc.cliente_nome || 'cliente').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '') + '.pdf';
+  const html = '<div style="width:794px;box-sizing:border-box;padding:44px 58px;background:#fff;color:#172033;font-family:Arial,Helvetica,sans-serif;">' +
+    '<div style="border-bottom:4px solid ' + LARANJA + ';padding-bottom:16px;display:flex;justify-content:space-between;gap:16px;align-items:flex-start">' +
+      '<div><div style="font-size:22px;font-weight:800;color:' + MARINHO + '">' + esc(empresa.nome_comercial || 'Prestador de serviços') + '</div>' +
+      '<div style="font-size:11px;color:#475569;margin-top:5px">' + esc(empresa.cpf_cnpj || '') + (empresa.telefone ? ' • ' + esc(empresa.telefone) : '') + '</div>' +
+      '<div style="font-size:11px;color:#475569">' + esc(empresa.endereco || '') + '</div></div>' +
+      '<div style="text-align:right"><div style="font-size:11px;color:#64748b;font-weight:bold">RECIBO Nº</div><div style="font-size:22px;font-weight:800;color:' + LARANJA + '">' + numero + '</div></div></div>' +
+    '<div style="text-align:center;margin:26px 0 20px"><div style="font-size:24px;font-weight:800;color:' + MARINHO + '">RECIBO DE PAGAMENTO</div><div style="font-size:12px;color:#64748b;margin-top:5px">Comprovante de quitação do serviço</div></div>' +
+    '<div style="border:1px solid #cbd5e1;border-radius:10px;padding:18px;font-size:13px;line-height:1.7">Recebemos de <b>' + esc(orc.cliente_nome || 'Cliente') + '</b> o valor de <b style="font-size:17px;color:' + MARINHO + '">' + brl(valor) + '</b>, referente a <b>' + esc(descricao) + '</b> (' + esc(origem) + ').</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;font-size:12px">' +
+      '<div style="border:1px solid #e2e8f0;padding:10px;border-radius:8px"><b>Data do pagamento</b><br>' + esc(fmtData(data)) + '</div>' +
+      '<div style="border:1px solid #e2e8f0;padding:10px;border-radius:8px"><b>Forma de recebimento</b><br>' + esc(orc.forma_recebimento || 'Não informada') + '</div>' +
+      '<div style="border:1px solid #e2e8f0;padding:10px;border-radius:8px"><b>Cliente</b><br>' + esc(orc.cliente_nome || '') + '</div>' +
+      '<div style="border:1px solid #e2e8f0;padding:10px;border-radius:8px"><b>Documento</b><br>' + esc(orc.cliente_documento || '—') + '</div></div>' +
+    (orc.assinatura_cliente ? '<div style="margin-top:20px;text-align:center"><img src="' + esc(orc.assinatura_cliente) + '" alt="Assinatura do cliente" style="max-width:220px;max-height:65px;object-fit:contain"><div style="width:260px;border-top:1px solid #94a3b8;margin:2px auto 0;padding-top:5px;font-size:10px">' + esc(orc.assinante_nome || 'Assinatura do cliente') + '</div></div>' : '<div style="margin-top:42px;width:280px;border-top:1px solid #94a3b8;text-align:center;padding-top:6px;margin-left:auto;margin-right:auto;font-size:10px">Assinatura do recebedor</div>') +
+    '<div style="margin-top:26px;border-top:1px solid #e2e8f0;padding-top:9px;text-align:center;font-size:9px;color:#64748b">Recibo interno de pagamento. Não substitui documento fiscal.</div></div>';
+  const el = document.createElement('div');
+  el.innerHTML = html;
+  const settings = {...opcoes(orc, nomeArquivoRecibo), margin:0};
+  await html2pdf().set(settings).from(el).save();
+}
+
+export async function compartilharReciboPDF(orc, perfil, texto) {
+  exigirBiblioteca();
+  const empresa = { ...(perfil || {}) };
+  Object.entries(orc.empresa || {}).forEach(([k, v]) => { if (String(v || '').trim()) empresa[k] = v; });
+  const numero = Number(orc.recibo_numero) || 1;
+  const valor = Math.max(0, parseNum(orc.valor_recebido));
+  const data = orc.pago_em || hojeISO();
+  const html = '<div style="width:794px;box-sizing:border-box;padding:44px 58px;background:#fff;color:#172033;font-family:Arial,Helvetica,sans-serif"><h1 style="color:' + MARINHO + '">' + esc(empresa.nome_comercial || 'Prestador de serviços') + '</h1><h2>RECIBO DE PAGAMENTO Nº ' + numero + '</h2><p>Recebemos de <b>' + esc(orc.cliente_nome || 'Cliente') + '</b> o valor de <b>' + brl(valor) + '</b>, referente a ' + esc(orc.obra_nome || 'serviço') + '.</p><p>Data: ' + esc(fmtData(data)) + ' • Forma: ' + esc(orc.forma_recebimento || 'Não informada') + '</p><p style="margin-top:70px;border-top:1px solid #64748b;width:280px;text-align:center;padding-top:6px">' + esc(empresa.nome_comercial || 'Recebedor') + '</p><p style="margin-top:24px;text-align:center;font-size:9px;color:#64748b">Recibo interno de pagamento. Não substitui documento fiscal.</p></div>';
+  const el = document.createElement('div'); el.innerHTML = html;
+  const nome = 'Recibo_' + numero + '_' + semAcentos(orc.cliente_nome || 'cliente').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '') + '.pdf';
+  const blob = await html2pdf().set({...opcoes(orc,nome),margin:0}).from(el).outputPdf('blob');
+  return entregarBlob(blob,nome,'Recibo de pagamento nº ' + numero,texto || 'Segue o recibo de pagamento.');
+}

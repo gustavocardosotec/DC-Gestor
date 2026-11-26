@@ -197,7 +197,7 @@ export function calcularTotais(orc) {
   return { subtotal, custo, maoDeObra, desconto, acrescimo, total, lucro: round2(subtotal - custo), porLoja };
 }
 
-export const itemVazio = (n = 3) => ({ descricao: '', qtd: 1, lojas: Array(n).fill(0), escolha: 'menor' });
+export const itemVazio = (n = 3) => ({ descricao: '', qtd: 1, lojas: Array(n).fill(0), escolha: 'menor', comprado: false });
 
 export const STATUS = {
   rascunho: { nome: 'Rascunho', cls: 'bg-slate-100 text-slate-600' },

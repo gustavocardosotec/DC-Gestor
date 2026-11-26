@@ -1,6 +1,6 @@
 // DC Gestor 3.1 - interface e eventos
 import {
-  $, $$, esc, uuid, brl, fmtData, fmtQtd, hojeISO, addDias, parseNum, numParaInput, apenasDigitos, semAcentos,
+  $, $$, esc, uuid, round2, brl, fmtData, fmtQtd, hojeISO, addDias, parseNum, numParaInput, apenasDigitos, semAcentos,
   MASCARAS, BANCOS, TIPOS_CHAVE, STATUS, statusDe, FORMAS_PGTO, itemVazio, calcularTotais, custoUnitario, vendaUnitaria, totalDoItem,
   precosDoItem, obterBanco, urlLogoBanco, fundoLogo, LOGO_EMPRESA, LOGO_ZAP, mascTel, mascDoc, normalizarChavePix
 } from './utils.js';
@@ -49,6 +49,93 @@ async function copiarTexto(texto) {
     document.execCommand('copy');
     t.remove();
   }
+}
+
+// =============================== Modo Balcão, materiais e lista do balconista ===============================
+const CHAVE_BALCAO = 'dcg:balcao';
+function aplicarBalcao() {
+  let ativo = false;
+  try { ativo = localStorage.getItem(CHAVE_BALCAO) === '1'; } catch { /* sem acesso ao armazenamento */ }
+  document.body.classList.toggle('balcao', ativo);
+  const b = $('#btn-balcao');
+  if (b) {
+    b.textContent = ativo ? '🙈' : '👁️';
+    b.setAttribute('aria-pressed', String(ativo));
+  }
+  return ativo;
+}
+function alternarBalcao() {
+  const ligar = !document.body.classList.contains('balcao');
+  try { localStorage.setItem(CHAVE_BALCAO, ligar ? '1' : '0'); } catch { /* ignora */ }
+  aplicarBalcao();
+  aviso(ligar ? 'Modo Balcão ligado: custos e margem ocultos.' : 'Modo Balcão desligado.');
+}
+
+const itensComDescricao = (o) => ((o && o.itens) || []).filter((i) => (i.descricao || '').trim());
+function resumoMateriais(o) {
+  const itens = itensComDescricao(o);
+  return { total: itens.length, falta: itens.filter((i) => !i.comprado).length };
+}
+function htmlResumoMateriais(o) {
+  const r = resumoMateriais(o);
+  if (!r.total) return '';
+  return r.falta
+    ? `<div class="rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-sm font-bold px-3 py-2">🟡 Falta comprar ${r.falta} de ${r.total} ${r.total === 1 ? 'item' : 'itens'}</div>`
+    : `<div class="rounded-xl bg-green-50 border border-green-200 text-green-800 text-sm font-bold px-3 py-2">🟢 Materiais OK: ${r.total === 1 ? 'o item já foi comprado' : `os ${r.total} itens já foram comprados`}</div>`;
+}
+const badgeMateriais = (o) => {
+  if (!['aceito', 'em_andamento'].includes(statusDe(o))) return '';
+  const r = resumoMateriais(o);
+  if (!r.total) return '';
+  return r.falta ? ` • 🟡 Falta comprar ${r.falta}` : ' • 🟢 Materiais OK';
+};
+
+/** Copia só nome e quantidade (sem preço e sem dados do cliente). Se já marcou itens como comprados, leva só o que falta. */
+async function copiarLista(o) {
+  const itens = itensComDescricao(o).filter((i) => parseNum(i.qtd) > 0);
+  if (!itens.length) return aviso('Não há materiais na lista.', true);
+  const faltam = itens.filter((i) => !i.comprado);
+  if (!faltam.length) return aviso('Todos os itens já estão marcados como comprados 🟢', false);
+  const linhas = faltam.map((i) => `• ${fmtQtd(parseNum(i.qtd))} × ${String(i.descricao).trim()}`);
+  await copiarTexto(`Olá! Preciso destes materiais:\n\n${linhas.join('\n')}\n\nObrigado!`);
+  aviso(`Lista copiada (${faltam.length} ${faltam.length === 1 ? 'item' : 'itens'}). É só colar no WhatsApp.`);
+}
+
+// =============================== Reajuste rápido de preço ===============================
+function abrirReajuste() {
+  const o = estado.rascunho;
+  if (!o) return;
+  const t = calcularTotais(o);
+  if (t.total <= 0) return aviso('Preencha os materiais antes de reajustar o preço.', true);
+  abrirModal(`<h2 class="titulo-sec">📈 Reajustar preço</h2>
+    <p class="text-sm text-slate-500 mb-3">Total atual: <b>${brl(t.total)}</b>. A diferença entra na <b>mão de obra</b>; os preços dos materiais não mudam.</p>
+    <div class="grid grid-cols-3 gap-2 mb-3">
+      ${[5, 10, 15].map((p) => `<button class="btn btn-sec" data-acao="reaj-pct" data-pct="${p}">+${p}%</button>`).join('')}
+    </div>
+    <div class="flex gap-2 items-end mb-4">
+      <label class="block flex-1"><span class="rot">Outro percentual (%)</span>
+        <input id="reaj-pct" class="campo" type="text" inputmode="decimal" placeholder="Ex.: 7,5 (ou -3 para reduzir)" autocomplete="off"></label>
+      <button class="btn btn-prim" data-acao="reaj-pct" data-pct="custom">Aplicar</button>
+    </div>
+    <span class="rot">Arredondar o total para cima</span>
+    <div class="grid grid-cols-3 gap-2 mb-4">
+      ${[5, 10, 50].map((b) => `<button class="btn btn-sec" data-acao="reaj-arred" data-base="${b}">Múltiplo de R$ ${b}</button>`).join('')}
+    </div>
+    <button class="btn btn-ghost w-full" data-acao="fechar-modal">Cancelar</button>`);
+}
+function aplicarReajuste(novoTotal) {
+  const o = estado.rascunho;
+  if (!o) return;
+  const antes = calcularTotais(o).total;
+  const delta = round2(novoTotal - antes);
+  if (Math.abs(delta) < 0.005) return aviso('O total já está nesse valor.');
+  o.mao_de_obra = Math.max(0, round2(parseNum(o.mao_de_obra) + delta));
+  const depois = calcularTotais(o).total;
+  fecharModal();
+  renderLevantamento();
+  agendarAutoSalvar();
+  if (Math.abs(depois - novoTotal) > 0.005) aviso(`A mão de obra não comporta toda a redução. Total: ${brl(depois)}.`, true, 4500);
+  else aviso(`Total reajustado: ${brl(antes)} → ${brl(depois)}`);
 }
 
 // =============================== Sessão e sincronização ===============================
@@ -201,18 +288,37 @@ function render() {
 function segmento(atual, opcoes, acao) {
   return `<div class="grid grid-cols-2 gap-1 p-1 bg-slate-200 rounded-xl mb-2">${opcoes.map(([k, nome]) => `<button class="min-h-[40px] rounded-lg text-sm font-bold ${atual === k ? 'bg-white shadow text-marinho' : 'text-slate-500'}" data-acao="${acao}" data-v="${k}">${nome}</button>`).join('')}</div>`;
 }
+// Filtros rápidos: cada atalho agrupa um ou mais status
+const FILTROS_RAPIDOS = [
+  ['todos', 'Todos', null],
+  ['pendentes', 'Pendentes', ['rascunho', 'aceito']],
+  ['aguardando', 'Aguardando', ['enviado']],
+  ['andamento', 'Em andamento', ['em_andamento']],
+  ['concluidos', 'Concluídos', ['concluido', 'pago']],
+  ['recusados', 'Recusados', ['recusado']]
+];
+const passaFiltro = (o, filtro) => {
+  const f = FILTROS_RAPIDOS.find((x) => x[0] === filtro);
+  return !f || !f[2] || f[2].includes(statusDe(o));
+};
+function htmlChips() {
+  const todos = Store.listarOrcamentos(estado.escopo);
+  return FILTROS_RAPIDOS.map(([k, nome]) => {
+    const q = todos.filter((o) => passaFiltro(o, k)).length;
+    return `<button class="chip shrink-0 ${estado.filtro === k ? 'ativo' : ''}" data-acao="filtro" data-filtro="${k}">${nome} <b>${q}</b></button>`;
+  }).join('');
+}
 function renderObras() {
   if (!empresaAtiva()) estado.escopo = 'pessoal';
   const notas = estado.lista === 'notas';
-  const chips = notas ? '' : `<div class="flex gap-2 overflow-x-auto pb-2 mb-2">${[['todos', 'Todos'], ...Object.entries(STATUS).map(([k, v]) => [k, v.nome])]
-    .map(([k, nome]) => `<button class="chip ${estado.filtro === k ? 'ativo' : ''}" data-acao="filtro" data-filtro="${k}">${nome}</button>`).join('')}</div>`;
+  const chips = notas ? '' : '<div id="chips-status" class="flex gap-2 overflow-x-auto pb-2 mb-2"></div>';
   conteudo.innerHTML = `
     <div id="atalhos"></div>
     ${segmento(estado.lista, [['orc', '📝 Orçamentos'], ['notas', '🧾 Notas de serviço']], 'modo-lista')}
     ${empresaAtiva() ? segmento(estado.escopo, [['pessoal', '👤 Pessoal'], ['empresa', '🏢 ' + esc(empresaAtiva().nome)]], 'escopo') : ''}
     <div class="flex gap-2 mb-3">
       <input id="busca" class="campo" type="search" placeholder="🔍 Buscar cliente, obra ou nº" value="${esc(estado.busca)}" autocomplete="off">
-      <button class="btn btn-sec shrink-0" data-acao="clientes" aria-label="Clientes salvos">👥</button>
+      <button class="btn btn-sec shrink-0" data-acao="clientes" aria-label="Clientes e lojas">👥</button>
       <button class="btn btn-prim shrink-0" data-acao="${notas ? 'nota-nova' : 'novo'}">＋ Novo</button>
     </div>
     ${chips}
@@ -225,9 +331,11 @@ function desenharLista() {
   if (estado.lista === 'notas') return desenharNotas();
   const alvo = $('#lista-obras');
   if (!alvo) return;
+  const cc = $('#chips-status');
+  if (cc) cc.innerHTML = htmlChips();
   const termo = semAcentos(estado.busca).toLowerCase().trim();
   const lista = Store.listarOrcamentos(estado.escopo).filter((o) => {
-    if (estado.filtro !== 'todos' && statusDe(o) !== estado.filtro) return false;
+    if (!passaFiltro(o, estado.filtro)) return false;
     if (!termo) return true;
     return semAcentos(`${o.cliente_nome} ${o.obra_nome} ${o.numero}`).toLowerCase().includes(termo);
   });
@@ -247,7 +355,7 @@ function desenharLista() {
         <div class="min-w-0">
           <div class="font-extrabold truncate">${esc(o.obra_nome || o.cliente_nome || 'Sem nome')}</div>
           <div class="text-sm text-slate-500 truncate">${esc(o.cliente_nome)}</div>
-          <div class="text-xs text-slate-400 mt-1">Nº ${esc(o.numero)} • ${fmtData(o.emitido_em)}${o._sync === 'pendente' ? ' • ⏳ não sincronizado' : ''}</div>
+          <div class="text-xs text-slate-400 mt-1">Nº ${esc(o.numero)} • ${fmtData(o.emitido_em)}${o._sync === 'pendente' ? ' • ⏳ não sincronizado' : ''}${badgeMateriais(o)}</div>
         </div>
         <div class="text-right shrink-0">
           <div class="font-extrabold text-brand">${brl(o.valor_total)}</div>
@@ -451,7 +559,7 @@ function renderLevantamento() {
         </div>
       </details>
 
-      <section class="cartao">
+      <section class="cartao interno">
         <h2 class="titulo-sec">🏪 Lojas da cotação</h2>
         <div class="space-y-2">
           ${o.lojas_nomes.map((nome, j) => `<div class="flex gap-2 items-end">${entrada('loja', j, `Loja ${j + 1}`, nome, { cls: 'flex-1' })}${o.lojas_nomes.length > 1 ? `<button class="btn btn-perigo" data-acao="rem-loja" data-j="${j}" aria-label="Remover loja ${j + 1}">🗑️</button>` : ''}</div>`).join('')}
@@ -461,15 +569,17 @@ function renderLevantamento() {
 
       <section class="cartao span-todas">
         <h2 class="titulo-sec">🧰 Materiais</h2>
+        <div id="resumo-mat" class="mb-3"></div>
         <div id="lista-itens" class="space-y-3"></div>
         <button class="btn btn-sec w-full mt-3" data-acao="add-item">＋ Adicionar item</button>
-        <div id="comparativo" class="mt-3"></div>
+        <button class="btn btn-ghost w-full mt-2" data-acao="copiar-lista">📋 Copiar lista para o balconista</button>
+        <div id="comparativo" class="mt-3 interno"></div>
       </section>
 
       <section class="cartao">
         <h2 class="titulo-sec">💰 Valores</h2>
         <div class="grid grid-cols-2 gap-3">
-          ${num('margem_lucro', 'Margem de lucro (%)')}
+          <div class="interno">${num('margem_lucro', 'Margem de lucro (%)')}</div>
           ${num('mao_de_obra', 'Mão de obra (R$)')}
           ${num('desconto', 'Desconto (R$)')}
           ${num('validade_dias', 'Validade (dias)')}
@@ -477,6 +587,7 @@ function renderLevantamento() {
           <label class="block"><span class="rot">Tensão da instalação</span><select class="campo" data-campo="tensao"><option value="127" ${o.tensao === '127' ? 'selected' : ''}>127 V</option><option value="220" ${o.tensao === '220' ? 'selected' : ''}>220 V</option></select></label>
           <label class="block"><span class="rot">Forma de pagamento</span><select class="campo" data-campo="forma_pagamento"><option value="">Não informar</option>${FORMAS_PGTO.map((f) => `<option ${o.forma_pagamento === f ? 'selected' : ''}>${f}</option>`).join('')}</select></label>
           <label class="block col-span-2"><span class="rot">Pix do orçamento (QR Code do PDF)</span><select class="campo" data-campo="pix_id">${pixOpcoes}</select></label>
+          <button class="btn btn-ghost col-span-2" data-acao="reajustar">📈 Reajustar preço (+5%, +10%, arredondar)</button>
           <label class="col-span-2 flex items-center gap-3 min-h-[44px] text-sm font-semibold"><input type="checkbox" data-campo="mostrar_pix" ${o.mostrar_pix ? 'checked' : ''} style="width:22px;height:22px;accent-color:#F26B1D"> Mostrar o Pix (QR Code) no PDF</label>
         </div>
       </section>
@@ -491,7 +602,7 @@ function renderLevantamento() {
       <div class="barra-total span-todas">
         <div class="flex justify-between items-end mb-2">
           <div><div class="text-xs text-slate-300">Total do orçamento</div><div id="bt-total" class="text-2xl font-extrabold">R$ 0,00</div></div>
-          <div class="text-right text-xs text-slate-300">Lucro estimado<br><b id="bt-lucro" class="text-sm text-white">R$ 0,00</b></div>
+          <div class="text-right text-xs text-slate-300 interno">Lucro estimado<br><b id="bt-lucro" class="text-sm text-white">R$ 0,00</b></div>
         </div>
         <div class="grid grid-cols-2 gap-2">
           <button class="btn btn-prim" data-acao="salvar">💾 Salvar</button>
@@ -538,6 +649,7 @@ function desenharItens() {
     return `<div class="rounded-xl border border-slate-200 p-3 bg-slate-50/60">
       <div class="flex items-center justify-between mb-2">
         <b class="text-sm">Item ${i + 1}</b>
+        <label class="flex items-center gap-2 min-h-[44px] text-xs font-semibold text-slate-600"><input type="checkbox" data-item="${i}" data-k="comprado" ${it.comprado ? 'checked' : ''} style="width:22px;height:22px;accent-color:#16a34a"> Já comprei</label>
         <button class="btn btn-perigo" data-acao="rem-item" data-i="${i}" aria-label="Remover item ${i + 1}">🗑️</button>
       </div>
       <label class="block"><span class="rot">Material</span>
@@ -545,10 +657,10 @@ function desenharItens() {
       <div class="grid grid-cols-2 gap-3 mt-2">
         <label class="block"><span class="rot">Quantidade</span>
           <input class="campo" data-item="${i}" data-k="qtd" type="text" inputmode="decimal" value="${numParaInput(it.qtd)}"></label>
-        <label class="block"><span class="rot">Usar preço de</span>
+        <label class="block interno"><span class="rot">Usar preço de</span>
           <select class="campo" data-item="${i}" data-k="escolha">${escolhas}</select></label>
       </div>
-      <div class="grid ${o.lojas_nomes.length <= 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2 mt-2">${o.lojas_nomes.map((_, j) => preco(j)).join('')}</div>
+      <div class="grid ${o.lojas_nomes.length <= 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2 mt-2 interno">${o.lojas_nomes.map((_, j) => preco(j)).join('')}</div>
       <p id="res-${i}" class="text-sm mt-2 text-slate-600"></p></div>`;
   }).join('');
 }
@@ -565,7 +677,7 @@ function atualizarCalculos(auto = true) {
     if (res) {
       const custo = custoUnitario(it);
       res.innerHTML = custo > 0
-        ? `Custo <b>${brl(custo)}</b> → venda <b>${brl(vendaUnitaria(it, o.margem_lucro))}</b> × ${fmtQtd(parseNum(it.qtd))} = <b class="text-brand">${brl(totalDoItem(it, o.margem_lucro))}</b>`
+        ? `<span class="interno">Custo <b>${brl(custo)}</b> → venda </span><span class="so-balcao">Valor unit. </span><b>${brl(vendaUnitaria(it, o.margem_lucro))}</b> × ${fmtQtd(parseNum(it.qtd))} = <b class="text-brand">${brl(totalDoItem(it, o.margem_lucro))}</b>`
         : 'Informe o preço em pelo menos uma loja.';
     }
     const precos = precosDoItem(it);
@@ -587,6 +699,8 @@ function atualizarCalculos(auto = true) {
       ${economia > 0.005 ? `<div class="text-xs text-green-700">Você economiza ${brl(economia)} frente à loja mais cara.</div>` : ''}
       <div class="text-[11px] text-slate-400">— = a loja não tem preço em algum item.</div>
     </div>`;
+  const rmat = $('#resumo-mat');
+  if (rmat) rmat.innerHTML = htmlResumoMateriais(o);
   $('#bt-total').textContent = brl(t.total);
   $('#bt-lucro').textContent = brl(t.lucro + t.maoDeObra);
   guardarRascunhoTemp();
@@ -608,6 +722,7 @@ function aoEditarItem(el) {
   if (!it) return;
   if (k === 'descricao') it.descricao = el.value;
   else if (k === 'qtd') it.qtd = parseNum(el.value);
+  else if (k === 'comprado') it.comprado = !!el.checked;
   else if (k === 'escolha') it.escolha = el.value === 'menor' ? 'menor' : Number(el.value);
   else if (k.startsWith('loja')) it.lojas[Number(k.slice(4))] = parseNum(el.value);
   atualizarCalculos();
@@ -1306,13 +1421,88 @@ function listaClientes() {
 }
 const resumoCliente = (o) => esc([o.cliente_endereco, o.cliente_bairro, o.cliente_cidade].filter(Boolean).join(' • ') || 'Sem endereço');
 
-function abrirClientes() {
-  estado.clientesRef = listaClientes();
-  if (!estado.clientesRef.length) return aviso('Ainda não há clientes salvos.', true);
-  abrirModal(`<h2 class="titulo-sec">👥 Clientes salvos</h2>
-    ${estado.clientesRef.map((o, i) => `<div class="cartao mb-2"><b class="block truncate">${esc(o.cliente_nome)}</b><small class="block truncate text-slate-500">${resumoCliente(o)}</small>
-      <div class="grid grid-cols-2 gap-2 mt-2"><button class="btn btn-ghost" data-acao="cli-orc" data-i="${i}">📝 Orçamento</button><button class="btn btn-ghost" data-acao="cli-nota" data-i="${i}">🧾 Nota</button></div></div>`).join('')}
+// ---------- Base de Clientes e Lojas / Fornecedores (4.0, melhoria 3) ----------
+const montarEndereco = (end, bairro, cidade, uf, cep) => [end, bairro, cidade, uf, cep].filter((x) => (x || '').trim()).join(', ');
+const enderecoCliente = (o) => montarEndereco(o.cliente_endereco, o.cliente_bairro, o.cliente_cidade, o.cliente_estado, o.cliente_cep);
+const enderecoLoja = (l) => montarEndereco(l.endereco, l.bairro, l.cidade, l.estado, l.cep);
+const botoesRota = (endereco) => (endereco
+  ? `<div class="grid grid-cols-2 gap-2 mt-2"><button class="btn btn-sec" data-acao="rota" data-app="maps" data-end="${esc(endereco)}">🗺️ Google Maps</button><button class="btn btn-sec" data-acao="rota" data-app="waze" data-end="${esc(endereco)}">🚗 Waze</button></div>`
+  : '');
+function abrirRota(app, endereco) {
+  if (!(endereco || '').trim()) return aviso('Sem endereço cadastrado.', true);
+  const q = encodeURIComponent(endereco);
+  const url = app === 'waze' ? `https://waze.com/ul?q=${q}&navigate=yes` : `https://www.google.com/maps/search/?api=1&query=${q}`;
+  window.open(url, '_blank', 'noopener');
+}
+
+function abrirClientes() { abrirBase('clientes'); }
+
+function abrirBase(aba = estado.baseAba || 'clientes') {
+  estado.baseAba = aba;
+  const abas = segmento(aba, [['clientes', '👥 Clientes'], ['lojas', '🏪 Lojas']], 'base-aba');
+  let corpo;
+  if (aba === 'lojas') {
+    const emp = empresaAtiva();
+    const escopo = emp ? estado.escopo : 'pessoal';
+    const lojas = Store.listarLojas(escopo);
+    corpo = `<p class="text-xs text-slate-500 mb-2">Lojas e fornecedores${emp ? ` (${escopo === 'empresa' ? '🏢 ' + esc(emp.nome) : '👤 Pessoal'})` : ''}. Toque em Maps ou Waze para ir até lá.</p>
+      <button class="btn btn-prim w-full mb-3" data-acao="loja-nova">＋ Nova loja / fornecedor</button>
+      ${lojas.length ? lojas.map((l) => `<div class="cartao mb-2"><b class="block truncate">${esc(l.nome)}</b>
+        <small class="block truncate text-slate-500">${esc(enderecoLoja(l) || 'Sem endereço')}</small>
+        ${l.telefone ? `<small class="block truncate text-slate-500">📞 ${esc(l.telefone)}</small>` : ''}
+        ${botoesRota(enderecoLoja(l))}
+        <div class="grid grid-cols-2 gap-2 mt-2"><button class="btn btn-ghost" data-acao="loja-editar" data-id="${l.id}">✏️ Editar</button><button class="btn btn-perigo" data-acao="loja-excluir" data-id="${l.id}">🗑️ Excluir</button></div></div>`).join('')
+        : '<div class="cartao text-center py-6 mb-2 text-sm text-slate-500">Nenhuma loja cadastrada ainda.</div>'}`;
+  } else {
+    estado.clientesRef = listaClientes();
+    corpo = estado.clientesRef.length
+      ? estado.clientesRef.map((o, i) => `<div class="cartao mb-2"><b class="block truncate">${esc(o.cliente_nome)}</b><small class="block truncate text-slate-500">${resumoCliente(o)}</small>
+        <div class="grid grid-cols-2 gap-2 mt-2"><button class="btn btn-ghost" data-acao="cli-orc" data-i="${i}">📝 Orçamento</button><button class="btn btn-ghost" data-acao="cli-nota" data-i="${i}">🧾 Nota</button></div>${botoesRota(enderecoCliente(o))}</div>`).join('')
+      : '<div class="cartao text-center py-6 mb-2 text-sm text-slate-500">Ainda não há clientes salvos. Eles aparecem aqui conforme você faz orçamentos e notas.</div>';
+  }
+  abrirModal(`<h2 class="titulo-sec">${aba === 'lojas' ? '🏪 Lojas / Fornecedores' : '👥 Clientes salvos'}</h2>${abas}${corpo}
     <button class="btn btn-ghost w-full" data-acao="fechar-modal">Fechar</button>`);
+}
+
+function abrirFormLoja(id) {
+  const l = id ? Store.obterLoja(id) : null;
+  estado.formLoja = l
+    ? { id: l.id, nome: l.nome || '', telefone: l.telefone || '', endereco: l.endereco || '', bairro: l.bairro || '', cep: l.cep || '', cidade: l.cidade || '', estado: l.estado || '', observacoes: l.observacoes || '' }
+    : { id: '', nome: '', telefone: '', endereco: '', bairro: '', cep: '', cidade: '', estado: '', observacoes: '' };
+  const f = estado.formLoja;
+  abrirModal(`<h2 class="titulo-sec">${l ? '✏️ Editar loja' : '＋ Nova loja / fornecedor'}</h2>
+    <div class="grid grid-cols-2 gap-2">
+      ${entrada('lj', 'nome', 'Nome da loja *', f.nome, { cls: 'col-span-2' })}
+      ${entrada('lj', 'telefone', 'Telefone', f.telefone, { cls: 'col-span-2', mask: 'tel', tipo: 'tel', modo: 'tel' })}
+      ${entrada('lj', 'endereco', 'Endereço', f.endereco, { cls: 'col-span-2' })}
+      ${entrada('lj', 'bairro', 'Bairro', f.bairro)}
+      ${entrada('lj', 'cep', 'CEP', f.cep, { mask: 'cep', modo: 'numeric' })}
+      ${entrada('lj', 'cidade', 'Cidade', f.cidade)}
+      ${entrada('lj', 'estado', 'Estado', f.estado)}
+      <label class="block col-span-2"><span class="rot">Observações</span><textarea class="campo" data-lj="observacoes">${esc(f.observacoes)}</textarea></label>
+      <button class="btn btn-prim" data-acao="loja-salvar">💾 Salvar</button>
+      <button class="btn btn-ghost" data-acao="loja-voltar">Cancelar</button>
+    </div>`);
+}
+function salvarFormLoja() {
+  const f = estado.formLoja;
+  if (!f) return;
+  if (!(f.nome || '').trim()) return aviso('Informe o nome da loja.', true);
+  const atual = f.id ? Store.obterLoja(f.id) : null;
+  const emp = estado.escopo === 'empresa' ? empresaAtiva() : null;
+  Store.salvarLoja({
+    ...f,
+    nome: f.nome.trim(),
+    id: f.id || uuid(),
+    empresa_id: atual ? (atual.empresa_id || null) : (emp ? emp.id : null),
+    origem_id: atual ? (atual.origem_id || null) : null,
+    created_at: atual ? atual.created_at : undefined
+  });
+  estado.formLoja = null;
+  atualizarStatus();
+  sincronizarAgora();
+  aviso('Loja salva ✔');
+  abrirBase('lojas');
 }
 
 // ---------- Cópia entre pessoal e empresa ----------
@@ -1344,10 +1534,13 @@ function atualizarOriginal(tipo, id) {
 function linhaExtra(tipo, o) {
   const a = armazem(tipo);
   const bt = [];
+  const botaoOS = tipo === 'orc' && statusDe(o) === 'aceito'
+    ? `<button class="btn btn-prim w-full mt-2" data-acao="iniciar-os" data-id="${o.id}">🔧 Iniciar OS</button>` : '';
   if (tipo === 'orc') bt.push(`<button class="btn btn-sec px-1 text-[13px]" data-acao="gerar-nota" data-id="${o.id}">🧾 Gerar nota</button>`);
+  if (tipo === 'orc') bt.push(`<button class="btn btn-sec px-1 text-[13px]" data-acao="copiar-lista-orc" data-id="${o.id}">📋 Copiar lista</button>`);
   if (empresaAtiva() && !o.empresa_id) bt.push(`<button class="btn btn-sec px-1 text-[13px]" data-acao="copiar-empresa" data-tipo="${tipo}" data-id="${o.id}">🏢 Enviar p/ empresa</button>`);
   if (o.empresa_id && o.origem_id && a.obter(o.origem_id)) bt.push(`<button class="btn btn-sec px-1 text-[13px]" data-acao="atualizar-original" data-tipo="${tipo}" data-id="${o.id}">⬆️ Atualizar meu original</button>`);
-  return bt.length ? `<div class="grid ${bt.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-2 mt-2">${bt.join('')}</div>` : '';
+  return botaoOS + (bt.length ? `<div class="grid ${bt.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-2 mt-2">${bt.join('')}</div>` : '');
 }
 
 // ---------- Nota de serviço ----------
@@ -1542,9 +1735,36 @@ async function mudarEmpresa(fazer, msg) {
 
 function acoesNovas(d) {
   switch (d.acao) {
+    case 'balcao': alternarBalcao(); return true;
+    case 'reajustar': abrirReajuste(); return true;
+    case 'reaj-pct': {
+      if (!estado.rascunho) return true;
+      const pct = d.pct === 'custom' ? parseNum(($('#reaj-pct') || {}).value) : Number(d.pct);
+      if (!pct) { aviso('Informe um percentual.', true); return true; }
+      aplicarReajuste(round2(calcularTotais(estado.rascunho).total * (1 + pct / 100)));
+      return true;
+    }
+    case 'reaj-arred': {
+      if (!estado.rascunho) return true;
+      const base = Number(d.base) || 10;
+      const total = calcularTotais(estado.rascunho).total;
+      aplicarReajuste(Math.ceil(round2(total) / base - 1e-9) * base);
+      return true;
+    }
+    case 'copiar-lista': copiarLista(estado.rascunho); return true;
+    case 'copiar-lista-orc': copiarLista(Store.obterOrcamento(d.id)); return true;
     case 'escopo': estado.escopo = d.v; renderObras(); return true;
     case 'modo-lista': estado.lista = d.v; renderObras(); return true;
     case 'clientes': abrirClientes(); return true;
+    case 'base-aba': abrirBase(d.v); return true;
+    case 'loja-nova': abrirFormLoja(''); return true;
+    case 'loja-editar': abrirFormLoja(d.id); return true;
+    case 'loja-salvar': salvarFormLoja(); return true;
+    case 'loja-voltar': estado.formLoja = null; abrirBase('lojas'); return true;
+    case 'loja-excluir':
+      if (confirm('Excluir esta loja?')) { Store.excluirLoja(d.id); atualizarStatus(); sincronizarAgora(); abrirBase('lojas'); }
+      return true;
+    case 'rota': abrirRota(d.app, d.end); return true;
     case 'cli-orc': {
       const ref = (estado.clientesRef || [])[Number(d.i)];
       if (!ref) return true;
@@ -1702,6 +1922,15 @@ async function aoClicar(ev) {
       return agendarAutoSalvar();
     case 'pdf': return baixarDaLista(d.id);
     case 'enviar': return enviarOrcamento(d.id);
+    case 'iniciar-os': {
+      const o = Store.obterOrcamento(d.id);
+      if (!o || statusDe(o) !== 'aceito') return;
+      Store.salvarOrcamento({ ...o, status: 'em_andamento' });
+      desenharLista();
+      atualizarStatus();
+      sincronizarAgora();
+      return aviso('OS iniciada! Orçamento agora está Em andamento.');
+    }
     case 'excluir':
       if (confirm('Excluir este orçamento? Essa ação não pode ser desfeita.')) {
         Store.excluirOrcamento(d.id);
@@ -1816,6 +2045,8 @@ function aoDigitar(ev) {
       const inChave = $('[data-fp="chave"]');
       if (inChave) inChave.value = f.chave;
     }
+  } else if (el.dataset.lj !== undefined && estado.formLoja) {
+    estado.formLoja[el.dataset.lj] = el.value;
   } else if (el.dataset.onb !== undefined && estado.onb) {
     estado.onb[el.dataset.onb] = el.value;
   } else if (el.dataset.zp !== undefined && estado.formZap) estado.formZap[el.dataset.zp] = el.value;
@@ -1874,6 +2105,7 @@ function ligarEventos() {
 async function iniciar() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('Service worker', e));
   ligarEventos();
+  aplicarBalcao();
   const user = await Auth.iniciar((evento, usuario) => {
     if (evento === 'SIGNED_IN' && usuario) entrarNoApp(usuario);
     if (evento === 'SIGNED_OUT' && estado.user) mostrarLogin();
@@ -1887,3 +2119,352 @@ async function iniciar() {
 }
 
 iniciar();
+// =============================== Complemento aditivo da 4.0 ===============================
+// Mantém o fluxo existente e adiciona as nove melhorias restantes em uma área própria.
+const V4_RECIBO_SEQ = 'dcg:v4:recibo-seq';
+const V4_AGENDA_AVISOS = 'dcg:v4:agenda-avisos';
+const V4_FEATURES = [
+  ['installments', '💳 Parcelamento inteligente'],
+  ['followup', '⏰ Acompanhamento de orçamentos'],
+  ['signature', '✍️ Assinatura digital'],
+  ['shopping', '🛒 Lista de compras consolidada'],
+  ['travel', '🚗 Taxa de deslocamento / visita'],
+  ['timeline', '🏠 Histórico do imóvel'],
+  ['agenda', '📅 Agenda da obra'],
+  ['profit', '📈 Termômetro de lucro'],
+  ['receipt', '🧾 Recibo de pagamento']
+];
+
+function v4OpenModal(html) {
+  const previous = $('#v4-dialog');
+  if (previous) { if (previous.open) previous.close(); previous.remove(); }
+  let style = $('#v4-dialog-style');
+  if (!style) {
+    style = document.createElement('style');
+    style.id = 'v4-dialog-style';
+    style.textContent = '#v4-dialog{box-sizing:border-box;width:min(42rem,calc(100vw - 2rem));max-width:none;max-height:calc(100dvh - 2rem);padding:0;border:0;border-radius:16px;background:#fff;color:#0f172a;overflow:auto}#v4-dialog::backdrop{background:rgb(15 23 42 / .55);overflow:hidden;overscroll-behavior:contain}#v4-dialog{overscroll-behavior:contain}#v4-dialog>.modal{box-sizing:border-box;width:100%;max-width:none;max-height:none;margin:0;padding:1rem;border:0;border-radius:16px;background:#fff;overflow:visible}';
+    document.head.appendChild(style);
+  }
+  const dialog = document.createElement('dialog');
+  dialog.id = 'v4-dialog';
+  const content = document.createElement('div');
+  content.className = 'modal';
+  content.innerHTML = html;
+  const heading = content.querySelector('.titulo-sec');
+  if (heading) { heading.id = 'v4-dialog-title'; dialog.setAttribute('aria-labelledby','v4-dialog-title'); }
+  dialog.appendChild(content);
+  dialog.addEventListener('close', () => dialog.remove(), {once:true});
+  document.body.appendChild(dialog);
+  dialog.showModal();
+  const focusTarget = dialog.querySelector('input,select,textarea,button');
+  if (focusTarget) focusTarget.focus();
+}
+function v4CloseModal() {
+  const dialog = $('#v4-dialog');
+  if (!dialog) return;
+  if (dialog.open) dialog.close();
+  dialog.remove();
+}
+
+function v4Money(value) { return brl(parseNum(value)); }
+function v4NowISO() { return new Date().toISOString(); }
+function v4RecordDate(value) {
+  const d = value ? new Date(value) : null;
+  return d && !Number.isNaN(d.getTime()) ? d : null;
+}
+function v4DateTimeLocal(value) {
+  const d = v4RecordDate(value);
+  if (!d) return '';
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+function v4CurrentProfile() {
+  return Store.obterPerfilAtivo(estado.escopo === 'empresa' ? 'empresa' : 'pessoal');
+}
+function v4SaveProfile(profile) {
+  if (estado.escopo === 'empresa' && empresaAtiva()) Store.salvarPerfilEmpresa(profile);
+  else Store.salvarPerfil(profile);
+  sincronizarAgora();
+}
+function v4Records() { return Store.listarOrcamentos(estado.escopo); }
+function v4BudgetLabel(o) {
+  const date = o.emitido_em ? fmtData(o.emitido_em) : 'Sem data';
+  return 'Nº ' + (o.numero || '—') + ' • ' + (o.cliente_nome || 'Sem cliente') + ' • ' + date + ' • ' + (STATUS[statusDe(o)] || STATUS.rascunho).nome;
+}
+function v4BudgetOptions(selected) {
+  const rows = v4Records().slice().sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  if (!rows.length) return '<option value="">Nenhum orçamento salvo neste espaço</option>';
+  return '<option value="">Selecione um orçamento</option>' + rows.map((o) => '<option value="' + esc(o.id) + '" ' + (o.id === selected ? 'selected' : '') + '>' + esc(v4BudgetLabel(o)) + '</option>').join('');
+}
+function v4SelectedBudget() {
+  const id = $('#v4-budget');
+  return id && id.value ? Store.obterOrcamento(id.value) : null;
+}
+function v4Input(id, label, value, options) {
+  const opts = options || {};
+  return '<label for="' + id + '" class="block ' + (opts.cls || '') + '"><span class="rot">' + label + '</span><input id="' + id + '" class="campo" type="' + (opts.type || 'text') + '" ' + (opts.inputmode ? 'inputmode="' + opts.inputmode + '" ' : '') + (opts.min !== undefined ? 'min="' + opts.min + '" ' : '') + (opts.step !== undefined ? 'step="' + opts.step + '" ' : '') + 'value="' + esc(value == null ? '' : value) + '"></label>';
+}
+function v4SelectBudget(selected, feature) {
+  return '<label for="v4-budget" class="block"><span class="rot">Orçamento / OS</span><select id="v4-budget" class="campo">' + v4BudgetOptions(selected) + '</select></label><button class="btn btn-ghost w-full mt-2 mb-3" data-v4="reload" data-feature="' + feature + '">Carregar dados do selecionado</button>';
+}
+function v4SaveBudget(o) {
+  if (!o) return;
+  if (estado.rascunho && estado.rascunho.id === o.id) {
+    Object.assign(estado.rascunho, o);
+    guardarRascunhoTemp();
+  }
+  Store.salvarOrcamento(o);
+  atualizarStatus();
+  sincronizarAgora();
+  if (estado.aba === 'obras') desenharLista();
+}
+function v4Home() {
+  const pendentes = v4Records().filter((o) => statusDe(o) === 'enviado').length;
+  const botoes = V4_FEATURES.map((x) => '<button class="btn btn-sec w-full justify-start" data-v4="feature" data-feature="' + x[0] + '">' + x[1] + (x[0] === 'followup' && pendentes ? ' <span class="ml-auto rounded-full bg-amber-100 px-2 text-amber-800">' + pendentes + '</span>' : '') + '</button>').join('');
+  v4OpenModal('<h1 class="titulo-sec">✨ Recursos extras da 4.0</h1><p class="text-sm text-slate-500 mb-3">As ferramentas usam os orçamentos e dados do espaço atual (' + (estado.escopo === 'empresa' ? 'empresa' : 'pessoal') + ').</p><div class="grid gap-2">' + botoes + '</div><button class="btn btn-ghost w-full mt-3" data-v4="close">Fechar</button>');
+}
+function v4Feature(mode, id) {
+  const o = id ? Store.obterOrcamento(id) : null;
+  const currentId = o ? o.id : (estado.rascunho && estado.rascunho.id);
+  if (mode === 'installments') {
+    const budget = o || (currentId ? Store.obterOrcamento(currentId) : null);
+    const amount = budget ? calcularTotais(budget).total : 0;
+    v4OpenModal('<h1 class="titulo-sec">💳 Entrada e parcelamento</h1>' + v4SelectBudget(currentId,'installments') + '<div class="grid grid-cols-2 gap-2">' + v4Input('v4-entry', 'Entrada (R$)', budget && budget.entrada || 0, {inputmode:'decimal'}) + v4Input('v4-installments', 'Parcelas do saldo', budget && budget.parcelas || 1, {type:'number',min:1,step:1}) + '</div><div class="cartao mt-3 text-sm">Total atual: <b>' + v4Money(amount) + '</b>. O saldo e o valor de cada parcela aparecem no PDF complementar.</div><div class="grid grid-cols-2 gap-2 mt-3"><button class="btn btn-prim" data-v4="installments-save">Salvar</button><button class="btn btn-sec" data-v4="installments-pdf">PDF com condições</button></div><button class="btn btn-ghost w-full mt-2" data-v4="close">Fechar</button>');
+  } else if (mode === 'followup') {
+    const profile = v4CurrentProfile();
+    const days = Math.max(1, Math.floor(parseNum(profile.followup_dias) || 3));
+    const rows = v4Records().filter((r) => statusDe(r) === 'enviado').sort((a,b) => String(a.enviado_em || a.updated_at || a.emitido_em || '').localeCompare(String(b.enviado_em || b.updated_at || b.emitido_em || '')));
+    const cards = rows.length ? rows.map((r) => {
+      const base = v4RecordDate(r.ultimo_followup_em || r.enviado_em || r.updated_at || r.emitido_em);
+      const age = base ? Math.max(0, Math.floor((Date.now() - base.getTime()) / 86400000)) : 0;
+      const overdue = age >= days;
+      return '<article class="cartao"><b>' + esc(v4BudgetLabel(r)) + '</b><p class="text-sm text-slate-500 mt-1">Enviado há ' + age + ' dia(s) • lembrete após ' + days + ' dia(s) ' + (overdue ? '• ⏰ Aguardando retorno' : '') + '</p><div class="grid grid-cols-2 gap-2 mt-2"><button class="btn btn-sec" data-v4="followup-mark" data-id="' + esc(r.id) + '">Registrar envio hoje</button><button class="btn btn-prim" data-v4="followup-open" data-id="' + esc(r.id) + '">Abrir WhatsApp</button></div></article>';
+    }).join('') : '<div class="cartao text-sm text-slate-500">Não há orçamentos com status Enviado neste espaço.</div>';
+    v4OpenModal('<h1 class="titulo-sec">⏰ Acompanhamento</h1><p class="text-sm text-slate-500 mb-3">Prazo configurado: ' + days + ' dia(s). Você pode ajustar abaixo.</p>' + v4Input('v4-followup-days','Avisar após (dias)',days,{type:'number',min:1,step:1}) + '<button class="btn btn-sec w-full mt-2 mb-3" data-v4="followup-settings">Salvar prazo</button><div class="grid gap-2">' + cards + '</div><button class="btn btn-ghost w-full mt-3" data-v4="close">Fechar</button>');
+  } else if (mode === 'signature') {
+    const budget = o || (currentId ? Store.obterOrcamento(currentId) : null);
+    const signed = budget && budget.assinatura_cliente;
+    v4OpenModal('<h1 class="titulo-sec">✍️ Assinatura do cliente</h1>' + v4SelectBudget(currentId,'signature') + v4Input('v4-signer','Nome de quem assina',budget && budget.assinante_nome || '') + '<canvas id="v4-signature" width="720" height="220" aria-label="Área para assinatura" style="display:block;width:100%;height:150px;touch-action:none;background:#fff;border:1px solid #cbd5e1;border-radius:12px">Área de assinatura. Use um navegador compatível para assinar.</canvas><p class="text-xs text-slate-500 mt-2">A assinatura e o nome ficam salvos junto ao orçamento e sincronizam com os dados do app. Ela marca o orçamento como Aceito e pode ser incluída no PDF complementar.</p>' + (signed ? '<p class="text-xs text-green-700 mt-2">Assinado em ' + esc(fmtData(budget.assinado_em)) + ' por ' + esc(budget.assinante_nome || 'cliente') + '.</p>' : '') + '<div class="grid grid-cols-3 gap-2 mt-3"><button class="btn btn-ghost" data-v4="signature-clear">Limpar</button><button class="btn btn-sec" data-v4="signature-pdf">PDF</button><button class="btn btn-prim" data-v4="signature-save">Salvar aceite</button></div><button class="btn btn-ghost w-full mt-2" data-v4="close">Fechar</button>');
+    v4WireCanvas();
+  } else if (mode === 'shopping') {
+    const rows = v4Records().filter((r) => ['aceito','em_andamento'].includes(statusDe(r)));
+    const list = rows.length ? rows.map((r) => '<label class="cartao flex items-start gap-3 mb-2"><input class="mt-1" type="checkbox" name="v4-shop" value="' + esc(r.id) + '"><span class="text-sm"><b class="block">' + esc(v4BudgetLabel(r)) + '</b><span class="text-slate-500">' + ((r.itens || []).filter((i) => !i.comprado && String(i.descricao || '').trim()).length) + ' material(is) faltando</span></span></label>').join('') : '<div class="cartao text-sm text-slate-500">Não há orçamentos aceitos ou em andamento.</div>';
+    v4OpenModal('<h1 class="titulo-sec">🛒 Lista de compras consolidada</h1><p class="text-sm text-slate-500 mb-3">Marque as obras que entram na compra. Itens já comprados ficam de fora.</p><div class="max-h-[55vh] overflow-auto">' + list + '</div><button class="btn btn-prim w-full mt-3" data-v4="shopping-build">Montar lista</button><button class="btn btn-ghost w-full mt-2" data-v4="close">Fechar</button>');
+  } else if (mode === 'travel') {
+    const profile = v4CurrentProfile();
+    v4OpenModal('<h1 class="titulo-sec">🚗 Taxa de visita técnica</h1><p class="text-sm text-slate-500 mb-3">O valor padrão fica salvo no perfil atual. Ao aplicar, ele entra como acréscimo no orçamento escolhido.</p>' + v4Input('v4-travel-default','Valor padrão (R$)',profile.taxa_visita || 0,{inputmode:'decimal'}) + v4SelectBudget(currentId,'travel') + '<button class="btn btn-sec w-full mt-2" data-v4="travel-settings">Salvar valor padrão</button><button class="btn btn-prim w-full mt-2" data-v4="travel-apply">Adicionar ao orçamento</button><button class="btn btn-ghost w-full mt-2" data-v4="close">Fechar</button>');
+  } else if (mode === 'timeline') {
+    const all = v4Records().concat(Store.listarNotas(estado.escopo));
+    const addresses = new Map();
+    all.forEach((r) => {
+      const label = [r.cliente_endereco, r.cliente_bairro, r.cliente_cidade, r.cliente_estado].filter(Boolean).join(', ');
+      if (label) addresses.set(semAcentos(label).toLowerCase(), label);
+    });
+    const options = Array.from(addresses.entries()).sort((a,b) => a[1].localeCompare(b[1])).map((x) => '<option value="' + esc(x[0]) + '">' + esc(x[1]) + '</option>').join('');
+    v4OpenModal('<h1 class="titulo-sec">🏠 Histórico do imóvel</h1><label for="v4-address" class="block mb-3"><span class="rot">Endereço</span><select id="v4-address" class="campo"><option value="">Selecione um endereço</option>' + options + '</select></label><button class="btn btn-prim w-full" data-v4="timeline-show">Ver histórico</button><div id="v4-timeline" class="mt-3"></div><button class="btn btn-ghost w-full mt-3" data-v4="close">Fechar</button>');
+  } else if (mode === 'agenda') {
+    const budget = o || (currentId ? Store.obterOrcamento(currentId) : null);
+    v4OpenModal('<h1 class="titulo-sec">📅 Agenda da obra</h1>' + v4SelectBudget(currentId,'agenda') + '<label for="v4-agenda" class="block"><span class="rot">Data e hora</span><input id="v4-agenda" class="campo" type="datetime-local" value="' + esc(v4DateTimeLocal(budget && budget.agenda_em)) + '"></label><label class="flex items-center gap-2 mt-3 text-sm"><input id="v4-agenda-enabled" type="checkbox" ' + (!budget || budget.agenda_aviso !== false ? 'checked' : '') + '> Avisar um dia antes e no dia</label><p class="text-xs text-slate-500 mt-2">Avisos locais aparecem quando o app está aberto. O atalho abaixo também pode adicionar a obra ao Google Agenda.</p><div class="grid grid-cols-2 gap-2 mt-3"><button class="btn btn-prim" data-v4="agenda-save">Salvar agenda</button><button class="btn btn-sec" data-v4="agenda-google">Google Agenda</button></div><button class="btn btn-ghost w-full mt-2" data-v4="agenda-permission">Ativar avisos neste aparelho</button><button class="btn btn-ghost w-full mt-2" data-v4="close">Fechar</button>');
+  } else if (mode === 'profit') {
+    const profile = v4CurrentProfile();
+    const budget = o || (currentId ? Store.obterOrcamento(currentId) : null);
+    v4OpenModal('<h1 class="titulo-sec">📈 Termômetro de lucro</h1>' + v4SelectBudget(currentId,'profit') + '<div class="grid grid-cols-3 gap-2">' + v4Input('v4-days','Dias previstos',budget && budget.dias_previstos || 0,{inputmode:'decimal'}) + v4Input('v4-hours','Horas previstas',budget && budget.horas_previstas || 0,{inputmode:'decimal'}) + v4Input('v4-people','Pessoas',budget && budget.pessoas || 1,{type:'number',min:1,step:1}) + '</div><div class="grid grid-cols-2 gap-2 mt-3">' + v4Input('v4-target-day','Meta por dia (R$)',profile.meta_dia || 0,{inputmode:'decimal'}) + v4Input('v4-target-hour','Meta por hora (R$)',profile.meta_hora || 0,{inputmode:'decimal'}) + '</div><div id="v4-profit-result" class="cartao mt-3 text-sm">' + (budget ? v4ProfitSummary(budget, profile) : 'Selecione um orçamento salvo para calcular.') + '</div><button class="btn btn-prim w-full mt-3" data-v4="profit-save">Salvar e calcular</button><button class="btn btn-ghost w-full mt-2" data-v4="close">Fechar</button>');
+  } else if (mode === 'receipt') {
+    const budget = o || (currentId ? Store.obterOrcamento(currentId) : null);
+    const total = budget ? calcularTotais(budget).total : 0;
+    const methods = FORMAS_PGTO.map((m) => '<option value="' + esc(m) + '" ' + (budget && budget.forma_recebimento === m ? 'selected' : '') + '>' + esc(m) + '</option>').join('');
+    v4OpenModal('<h1 class="titulo-sec">🧾 Recibo de pagamento</h1>' + v4SelectBudget(currentId,'receipt') + '<div class="grid grid-cols-2 gap-2">' + v4Input('v4-received','Valor recebido (R$)',budget && budget.valor_recebido || total,{inputmode:'decimal'}) + v4Input('v4-paid-date','Data do pagamento',budget && budget.pago_em || hojeISO(),{type:'date'}) + '</div><label for="v4-receipt-method" class="block mt-2"><span class="rot">Forma de recebimento</span><select id="v4-receipt-method" class="campo"><option value="">Selecione</option>' + methods + '</select></label><p class="text-sm text-slate-500 mt-3">Ao confirmar, o orçamento passa para Pago e recebe uma numeração própria de recibo.</p><button class="btn btn-prim w-full mt-3" data-v4="receipt-create">Marcar como pago e gerar recibo</button><button class="btn btn-ghost w-full mt-2" data-v4="close">Fechar</button>');
+  }
+}
+
+function v4ProfitSummary(o, profile) {
+  const total = calcularTotais(o);
+  const lucro = round2(total.total - total.custo);
+  const dias = parseNum(o.dias_previstos);
+  const horas = parseNum(o.horas_previstas);
+  const pessoas = Math.max(1, parseNum(o.pessoas) || 1);
+  const dia = dias > 0 ? lucro / (dias * pessoas) : null;
+  const hora = horas > 0 ? lucro / (horas * pessoas) : null;
+  const check = (value, target) => value == null ? 'Informe o tempo previsto.' : (parseNum(target) > 0 ? (value >= parseNum(target) ? '🟢 Meta atingida' : '🟡 Abaixo da meta') : 'Meta ainda não configurada');
+  return '<b>Lucro estimado da obra: ' + v4Money(lucro) + '</b><p class="mt-2">Por pessoa/dia: <b>' + (dia == null ? '—' : v4Money(dia)) + '</b> • ' + check(dia, profile.meta_dia) + '</p><p>Por pessoa/hora: <b>' + (hora == null ? '—' : v4Money(hora)) + '</b> • ' + check(hora, profile.meta_hora) + '</p>';
+}
+
+function v4WireCanvas() {
+  const canvas = $('#v4-signature');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#15233b'; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  let drawing = false;
+  const point = (ev) => { const r = canvas.getBoundingClientRect(); return {x:(ev.clientX-r.left)*canvas.width/r.width,y:(ev.clientY-r.top)*canvas.height/r.height}; };
+  canvas.addEventListener('pointerdown', (ev) => { drawing = true; canvas.setPointerCapture(ev.pointerId); const p = point(ev); ctx.beginPath(); ctx.moveTo(p.x,p.y); canvas.dataset.drew = '1'; });
+  canvas.addEventListener('pointermove', (ev) => { if (!drawing) return; const p = point(ev); ctx.lineTo(p.x,p.y); ctx.stroke(); });
+  canvas.addEventListener('pointerup', () => { drawing = false; });
+  canvas.addEventListener('pointercancel', () => { drawing = false; });
+}
+
+function v4AddSignatureToBudget(o) {
+  const canvas = $('#v4-signature');
+  if (!o || !canvas || canvas.dataset.drew !== '1') { aviso('Faça a assinatura no quadro antes de salvar.', true); return; }
+  o.assinatura_cliente = canvas.toDataURL('image/png');
+  o.assinante_nome = ($('#v4-signer') || {}).value.trim();
+  o.assinado_em = v4NowISO();
+  o.status = 'aceito';
+  v4SaveBudget(o);
+  aviso('Assinatura salva e orçamento marcado como Aceito.');
+  v4Feature('signature', o.id);
+}
+
+function v4ShoppingResult() {
+  const ids = $$('input[name="v4-shop"]:checked', $('#v4-dialog')).map((e) => e.value);
+  const rows = ids.flatMap((id) => { const o = Store.obterOrcamento(id); return (o && o.itens || []).filter((i) => !i.comprado && parseNum(i.qtd) > 0 && String(i.descricao || '').trim()).map((i) => ({name:String(i.descricao).trim(),qty:parseNum(i.qtd)})); });
+  const groups = new Map();
+  rows.forEach((r) => { const key = semAcentos(r.name).toLowerCase().replace(/\s+/g,' ').trim(); const old = groups.get(key); if (old) old.qty += r.qty; else groups.set(key,{name:r.name,qty:r.qty}); });
+  const items = Array.from(groups.values()).sort((a,b) => a.name.localeCompare(b.name));
+  if (!items.length) { aviso('Marque pelo menos uma obra com materiais pendentes.', true); return; }
+  const text = items.map((x) => '• ' + fmtQtd(x.qty) + ' × ' + x.name).join('\n');
+  v4OpenModal('<h1 class="titulo-sec">🛒 Compra consolidada</h1><div class="cartao whitespace-pre-line text-sm">' + esc(text) + '</div><p class="text-xs text-slate-500 mt-2">' + items.length + ' material(is) diferente(s). Quantidades de descrições iguais foram somadas.</p><button class="btn btn-prim w-full mt-3" data-v4="shopping-copy">Copiar lista</button><button class="btn btn-ghost w-full mt-2" data-v4="shopping-back">Voltar</button>');
+}
+
+function v4ShowTimeline() {
+  const select = $('#v4-address');
+  const target = $('#v4-timeline');
+  if (!select || !target || !select.value) { aviso('Escolha um endereço.', true); return; }
+  const records = v4Records().map((r) => ({...r,_tipo:'Orçamento / OS'})).concat(Store.listarNotas(estado.escopo).map((r) => ({...r,_tipo:'Nota de serviço'})));
+  const list = records.filter((r) => {
+    const address = [r.cliente_endereco,r.cliente_bairro,r.cliente_cidade,r.cliente_estado].filter(Boolean).join(', ');
+    return address && semAcentos(address).toLowerCase() === select.value;
+  }).sort((a,b) => String(b.emitido_em || '').localeCompare(String(a.emitido_em || '')));
+  target.innerHTML = list.length ? list.map((r) => '<article class="cartao mb-2"><b>' + esc(r._tipo) + ' nº ' + esc(r.numero || '—') + ' • ' + esc(r.cliente_nome || '') + '</b><p class="text-sm text-slate-500">' + esc(r.emitido_em ? fmtData(r.emitido_em) : 'Sem data') + (r.status ? ' • ' + esc((STATUS[statusDe(r)] || {}).nome || r.status) : '') + '</p><p class="font-bold mt-1">' + v4Money(r.valor_total || (r._tipo === 'Nota de serviço' ? PDF.calcularTotaisNota(r).total : calcularTotais(r).total)) + '</p><p class="text-sm text-slate-600">' + esc(r.obra_nome || 'Serviço sem título') + '</p></article>').join('') : '<div class="cartao text-sm text-slate-500">Nenhum atendimento encontrado neste endereço.</div>';
+}
+
+function v4GoogleCalendarUrl(o) {
+  const d = v4RecordDate(o && o.agenda_em);
+  if (!d) return '';
+  const end = new Date(d.getTime() + 60 * 60000);
+  const stamp = (x) => x.toISOString().replace(/[-:]/g,'').replace(/\.\d{3}Z$/,'Z');
+  const title = 'DC Gestor • ' + (o.obra_nome || 'Obra') + (o.cliente_nome ? ' • ' + o.cliente_nome : '');
+  const detail = 'Orçamento nº ' + (o.numero || '') + (o.cliente_telefone ? ' • Telefone: ' + o.cliente_telefone : '');
+  const location = [o.cliente_endereco,o.cliente_bairro,o.cliente_cidade,o.cliente_estado].filter(Boolean).join(', ');
+  return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + encodeURIComponent(title) + '&dates=' + stamp(d) + '/' + stamp(end) + '&details=' + encodeURIComponent(detail) + '&location=' + encodeURIComponent(location);
+}
+
+function v4CheckAgenda() {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  const today = hojeISO();
+  const tomorrow = addDias(today, 1);
+  let seen = {};
+  try { seen = JSON.parse(localStorage.getItem(V4_AGENDA_AVISOS) || '{}'); } catch { seen = {}; }
+  v4Records().forEach((o) => {
+    if (o.agenda_aviso === false || !o.agenda_em) return;
+    const date = v4RecordDate(o.agenda_em);
+    if (!date || date.getTime() < Date.now()) return;
+    const keyDate = date.getFullYear() + '-' + String(date.getMonth()+1).padStart(2,'0') + '-' + String(date.getDate()).padStart(2,'0');
+    const kind = keyDate === today ? 'today' : keyDate === tomorrow ? 'tomorrow' : '';
+    if (!kind) return;
+    const key = o.id + ':' + kind + ':' + keyDate;
+    if (seen[key]) return;
+    const when = date.toLocaleString('pt-BR', {dateStyle:'short',timeStyle:'short'});
+    try { new Notification(kind === 'today' ? 'Obra agendada para hoje' : 'Obra agendada para amanhã', {body:(o.cliente_nome || 'Cliente') + ' • ' + (o.obra_nome || 'Serviço') + ' • ' + when, tag:key}); } catch { return; }
+    seen[key] = true;
+  });
+  try { localStorage.setItem(V4_AGENDA_AVISOS, JSON.stringify(seen)); } catch { /* armazenamento opcional */ }
+}
+
+function v4EnsureButton() {
+  const base = $('#btn-balcao');
+  if (!base || $('#btn-v4-recursos')) return;
+  const button = document.createElement('button');
+  button.id = 'btn-v4-recursos'; button.type = 'button'; button.className = 'text-sm font-bold min-h-[44px] px-2 rounded-full text-brand';
+  button.textContent = '＋ 4.0'; button.setAttribute('aria-label','Abrir recursos extras da versão 4.0'); button.dataset.v4 = 'home';
+  base.insertAdjacentElement('afterend', button);
+}
+
+function v4Action(action, el) {
+  const id = el.dataset.id || '';
+  if (action === 'home') return v4Home();
+  if (action === 'close') return v4CloseModal();
+  if (action === 'feature') return v4Feature(el.dataset.feature);
+  if (action === 'reload') return v4Feature(el.dataset.feature, ($('#v4-budget') || {}).value);
+  if (action === 'installments-save' || action === 'installments-pdf') {
+    const o = v4SelectedBudget();
+    if (!o) return aviso('Selecione um orçamento salvo.', true);
+    o.entrada = Math.min(calcularTotais(o).total, Math.max(0, parseNum($('#v4-entry').value)));
+    o.parcelas = Math.max(1, Math.floor(parseNum($('#v4-installments').value) || 1));
+    v4SaveBudget(o);
+    if (action === 'installments-pdf') return PDF.baixarPDFComplemento(o, perfilDoRegistro(o)).catch((e) => aviso(e.message || 'Não foi possível gerar o PDF.', true));
+    aviso('Entrada e parcelas salvas.'); return v4Feature('installments',o.id);
+  }
+  if (action === 'followup-settings') {
+    const p = v4CurrentProfile(); p.followup_dias = Math.max(1, Math.floor(parseNum($('#v4-followup-days').value) || 3)); v4SaveProfile(p); aviso('Prazo de acompanhamento salvo.'); return v4Feature('followup');
+  }
+  if (action === 'followup-mark' || action === 'followup-open') {
+    const o = Store.obterOrcamento(id); if (!o) return aviso('Orçamento não encontrado.', true);
+    const now = v4NowISO();
+    if (action === 'followup-mark') o.enviado_em = now;
+    else o.enviado_em = o.enviado_em || now;
+    o.ultimo_followup_em = now; v4SaveBudget(o);
+    if (action === 'followup-open') {
+      const phone = apenasDigitos(o.cliente_telefone || ''); const number = phone ? (phone.startsWith('55') && phone.length > 11 ? phone : '55' + phone) : '';
+    const message = 'Olá, ' + (o.cliente_nome || 'tudo bem?') + '! Passando para saber se conseguiu avaliar o orçamento nº ' + (o.numero || '') + '. Se tiver alguma dúvida, estou à disposição.';
+      window.open('https://wa.me/' + number + '?text=' + encodeURIComponent(message), '_blank', 'noopener,noreferrer');
+    }
+    aviso(action === 'followup-open' ? 'Lembrete registrado.' : 'Envio de hoje registrado.'); return v4Feature('followup');
+  }
+  if (action === 'signature-clear') { const c=$('#v4-signature'); if(c){c.getContext('2d').clearRect(0,0,c.width,c.height);c.getContext('2d').fillStyle='#fff';c.getContext('2d').fillRect(0,0,c.width,c.height);delete c.dataset.drew;} return; }
+  if (action === 'signature-save') return v4AddSignatureToBudget(v4SelectedBudget());
+  if (action === 'signature-pdf') { const o=v4SelectedBudget(); if(!o) return aviso('Selecione um orçamento salvo.',true); return PDF.baixarPDFComplemento(o,perfilDoRegistro(o)).catch((e)=>aviso(e.message||'Não foi possível gerar o PDF.',true)); }
+  if (action === 'shopping-build') return v4ShoppingResult();
+  if (action === 'shopping-copy') { const text=$('#v4-dialog .cartao'); if(!text) return; return copiarTexto(text.innerText).then(()=>aviso('Lista copiada.')); }
+  if (action === 'shopping-back') return v4Feature('shopping');
+  if (action === 'travel-settings') { const p=v4CurrentProfile(); p.taxa_visita=Math.max(0,parseNum($('#v4-travel-default').value)); v4SaveProfile(p); aviso('Valor padrão salvo.'); return v4Feature('travel',($('#v4-budget')||{}).value); }
+  if (action === 'travel-apply') { const o=v4SelectedBudget(); if(!o) return aviso('Selecione um orçamento salvo.',true); const p=v4CurrentProfile(); const value=Math.max(0,parseNum($('#v4-travel-default').value || p.taxa_visita)); if(value<=0) return aviso('Informe um valor de visita técnica.',true); o.acrescimos=Array.isArray(o.acrescimos)?o.acrescimos:[]; const name='Taxa de deslocamento / visita técnica'; if(o.acrescimos.some((x)=>String(x.nome||'').toLowerCase()===name.toLowerCase())) return aviso('Essa taxa já foi adicionada a este orçamento.',true); o.acrescimos.push({nome:name,valor:value}); v4SaveBudget(o); aviso('Taxa adicionada ao orçamento.'); return v4Feature('travel',o.id); }
+  if (action === 'timeline-show') return v4ShowTimeline();
+  if (action === 'agenda-save') { const o=v4SelectedBudget(); if(!o) return aviso('Selecione um orçamento salvo.',true); const value=$('#v4-agenda').value; o.agenda_em=value?new Date(value).toISOString():null; o.agenda_aviso=$('#v4-agenda-enabled').checked; v4SaveBudget(o); aviso('Agenda salva.'); return v4Feature('agenda',o.id); }
+  if (action === 'agenda-google') { const o=v4SelectedBudget(); if(!o) return aviso('Selecione um orçamento salvo.',true); const value=$('#v4-agenda').value; if(value) o.agenda_em=new Date(value).toISOString(); if(!o.agenda_em) return aviso('Escolha data e hora antes de abrir o Google Agenda.',true); window.open(v4GoogleCalendarUrl(o),'_blank','noopener,noreferrer'); return; }
+  if (action === 'agenda-permission') { if(typeof Notification==='undefined') return aviso('Este navegador não oferece avisos locais.',true); Notification.requestPermission().then((p)=>{ if(p==='granted'){v4CheckAgenda();aviso('Avisos locais ativados neste aparelho.');} else aviso('Permissão de avisos não foi ativada.',true); }); return; }
+  if (action === 'profit-save') { const o=v4SelectedBudget(); if(!o) return aviso('Selecione um orçamento salvo.',true); o.dias_previstos=Math.max(0,parseNum($('#v4-days').value)); o.horas_previstas=Math.max(0,parseNum($('#v4-hours').value)); o.pessoas=Math.max(1,Math.floor(parseNum($('#v4-people').value)||1)); const p=v4CurrentProfile(); p.meta_dia=Math.max(0,parseNum($('#v4-target-day').value)); p.meta_hora=Math.max(0,parseNum($('#v4-target-hour').value)); v4SaveBudget(o); v4SaveProfile(p); $('#v4-profit-result').innerHTML=v4ProfitSummary(o,p); aviso('Tempo previsto e metas salvos.'); return; }
+  if (action === 'receipt-create') {
+    const o=v4SelectedBudget(); if(!o) return aviso('Selecione um orçamento salvo.',true);
+    const amount=Math.max(0,parseNum($('#v4-received').value)); if(amount<=0) return aviso('Informe o valor recebido.',true);
+    const used=v4Records().map((r)=>Number(r.recibo_numero)||0); const seq=Math.max(Number(localStorage.getItem(V4_RECIBO_SEQ)||0),0,...used)+1;
+    o.valor_recebido=amount; o.pago_em=$('#v4-paid-date').value || hojeISO(); o.forma_recebimento=$('#v4-receipt-method').value || ''; o.recibo_numero=Number(o.recibo_numero)||seq; o.status='pago';
+    v4SaveBudget(o); try { localStorage.setItem(V4_RECIBO_SEQ,String(Math.max(Number(localStorage.getItem(V4_RECIBO_SEQ)||0),o.recibo_numero))); } catch { /* a numeração também fica salva no orçamento */ }
+    return PDF.baixarReciboPDF(o,perfilDoRegistro(o)).then(()=>aviso('Pagamento salvo e recibo gerado.')).catch((e)=>aviso(e.message||'Pagamento salvo, mas o PDF não foi gerado.',true));
+  }
+}
+
+document.addEventListener('click', (ev) => {
+  const el = ev.target instanceof Element ? ev.target.closest('[data-v4]') : null;
+  if (!el) return;
+  ev.preventDefault(); ev.stopImmediatePropagation();
+  try { const result = v4Action(el.dataset.v4, el); if (result && typeof result.catch === 'function') result.catch((e) => aviso(e.message || 'Não foi possível concluir esta ação.', true)); }
+  catch (e) { aviso(e.message || 'Não foi possível concluir esta ação.', true); }
+}, true);
+
+function v4WaitForSentStatus(id, attempts) {
+  setTimeout(() => {
+    const o = Store.obterOrcamento(id);
+    if (!o) return;
+    if (statusDe(o) === 'enviado') {
+      if (!o.enviado_em) { o.enviado_em = v4NowISO(); v4SaveBudget(o); }
+      return;
+    }
+    if (attempts < 60) v4WaitForSentStatus(id, attempts + 1);
+  }, 1000);
+}
+document.addEventListener('click', (ev) => {
+  const send = ev.target instanceof Element ? ev.target.closest('[data-acao="enviar"]') : null;
+  if (send && send.dataset.id) v4WaitForSentStatus(send.dataset.id, 0);
+}, true);
+
+const v4ButtonObserver = new MutationObserver(v4EnsureButton);
+if ($('#app')) v4ButtonObserver.observe($('#app'), {childList:true,subtree:true});
+v4EnsureButton();
+if ('serviceWorker' in navigator) {
+  const registerV4Worker = () => navigator.serviceWorker.register('./sw-v4.0.7.js',{scope:'./'}).catch((e)=>console.warn('Service worker 4.0',e));
+  registerV4Worker();
+  setTimeout(registerV4Worker, 1000);
+}
+window.addEventListener('focus',v4CheckAgenda);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')v4CheckAgenda();});
+setTimeout(v4CheckAgenda,1800);
