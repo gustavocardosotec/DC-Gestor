@@ -1,0 +1,32 @@
+# Segredos e variáveis de ambiente
+.env
+.env.*
+!.env.example
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Dependências
+node_modules/
+
+# Editor / ferramentas locais
+.vscode/
+.idea/
+.claude/
+CLAUDE.md
+!CLAUDE.md
+.vercel/
+
+# Backups e referências locais
+Backups/
+Referencias/
+
+# Banco de dados: rascunhos e scripts temporários
+sql/temp/
+
+# Logs e temporários
+*.log
+*.tmp
+__tmp__*
